@@ -1,0 +1,441 @@
+Time Spent Today:
+1h 16m
+
+Start Lab
+✅ Connected
+Delete Lab
+SSH Access
+
+Video
+Lab Material
+Lab 1: Introduction to Ansible Automation Platform
+Objectives
+By the end of this lab, students will be able to:
+
+Understand the core components of Ansible Automation Platform
+Successfully install Ansible Automation Controller (AWX)
+Successfully install Automation Hub (Pulp)
+Navigate and verify the web interfaces of both components
+Demonstrate basic functionality of the Ansible Automation Platform
+Troubleshoot common installation issues
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with YAML syntax
+Knowledge of containerization concepts (Docker/Podman)
+Understanding of web services and HTTP protocols
+Basic networking concepts (ports, firewalls, DNS)
+Technical Requirements:
+
+Linux-based system with root or sudo access
+Minimum 8GB RAM and 4 CPU cores
+At least 50GB available disk space
+Internet connectivity for downloading packages
+Lab Environment Setup
+Good News! Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab and you'll have access to a ready-to-use environment with all necessary prerequisites installed. No need to build your own virtual machine or worry about system requirements.
+
+Your cloud machine includes:
+
+CentOS Stream 9 or RHEL 9 compatible system
+Docker and Podman pre-installed
+Required networking configurations
+Sufficient resources for running Ansible Automation Platform
+Task 1: Install Ansible Automation Controller (AWX)
+Ansible Automation Controller is the web-based user interface and REST API for Ansible. We'll use AWX, which is the open-source upstream project for Automation Controller.
+
+Subtask 1.1: Prepare the System Environment
+First, let's ensure our system is updated and has all necessary dependencies.
+
+# Update the system packages
+sudo dnf update -y
+
+# Install required packages
+sudo dnf install -y git curl wget python3 python3-pip nodejs npm
+
+# Install Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# Verify Docker Compose installation
+docker-compose --version
+Subtask 1.2: Clone AWX Repository
+# Navigate to home directory
+cd ~
+
+# Clone the AWX repository
+git clone https://github.com/ansible/awx.git
+
+# Navigate to AWX directory
+cd awx
+
+# Check available tags and use the latest stable version
+git tag | tail -10
+git checkout $(git tag | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+Subtask 1.3: Configure AWX Installation
+# Navigate to the installer directory
+cd ~/awx/tools/docker-compose
+
+# Create a custom inventory file
+cp inventory.example inventory
+
+# Edit the inventory file with basic configuration
+cat > inventory << 'EOF'
+# AWX Configuration
+admin_user=admin
+admin_password=ansible123
+secret_key=awxsecretkey123456789
+database_name=awx
+database_user=awx
+database_password=awxpass
+database_host=postgres
+database_port=5432
+
+# Docker configuration
+docker_compose_dir=/tmp/awxcompose
+pg_username=awx
+pg_password=awxpass
+pg_database=awx
+pg_port=5432
+
+# Web configuration
+host_port=8080
+host_port_ssl=8443
+
+# Project directory
+project_data_dir=/tmp/awx_projects
+EOF
+Subtask 1.4: Install and Start AWX
+# Make the installation script executable
+chmod +x install.sh
+
+# Run the AWX installation
+./install.sh
+
+# Wait for installation to complete (this may take 10-15 minutes)
+# Monitor the installation progress
+docker-compose -f /tmp/awxcompose/docker-compose.yml logs -f
+Subtask 1.5: Verify AWX Installation
+# Check if all containers are running
+docker ps
+
+# Verify AWX is accessible
+curl -k http://localhost:8080
+
+# Check AWX logs for any errors
+docker-compose -f /tmp/awxcompose/docker-compose.yml logs awx_web
+Task 2: Install Automation Hub (Pulp)
+Automation Hub serves as a repository for Ansible content including collections, execution environments, and other automation assets. We'll install Pulp, the open-source project that powers Automation Hub.
+
+Subtask 2.1: Install Pulp Dependencies
+# Install Python virtual environment tools
+sudo dnf install -y python3-venv python3-devel gcc
+
+# Install PostgreSQL for Pulp database
+sudo dnf install -y postgresql postgresql-server postgresql-devel
+
+# Initialize PostgreSQL
+sudo postgresql-setup --initdb
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
+
+# Install Redis for Pulp caching
+sudo dnf install -y redis
+sudo systemctl enable redis
+sudo systemctl start redis
+Subtask 2.2: Configure PostgreSQL for Pulp
+# Switch to postgres user and create database
+sudo -u postgres psql << 'EOF'
+CREATE DATABASE pulp;
+CREATE USER pulp WITH PASSWORD 'pulppassword';
+GRANT ALL PRIVILEGES ON DATABASE pulp TO pulp;
+ALTER USER pulp CREATEDB;
+\q
+EOF
+
+# Configure PostgreSQL authentication
+sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /var/lib/pgsql/data/postgresql.conf
+echo "host pulp pulp 127.0.0.1/32 md5" | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
+
+# Restart PostgreSQL
+sudo systemctl restart postgresql
+Subtask 2.3: Install Pulp using pip
+# Create a dedicated user for Pulp
+sudo useradd --system --shell /bin/bash --home-dir /var/lib/pulp --create-home pulp
+
+# Create Python virtual environment
+sudo -u pulp python3 -m venv /var/lib/pulp/pulpvenv
+
+# Activate virtual environment and install Pulp
+sudo -u pulp /var/lib/pulp/pulpvenv/bin/pip install --upgrade pip setuptools wheel
+
+# Install Pulp core and Ansible plugin
+sudo -u pulp /var/lib/pulp/pulpvenv/bin/pip install pulpcore[postgres]
+sudo -u pulp /var/lib/pulp/pulpvenv/bin/pip install pulp-ansible
+sudo -u pulp /var/lib/pulp/pulpvenv/bin/pip install pulp-container
+Subtask 2.4: Configure Pulp Settings
+# Create Pulp configuration directory
+sudo mkdir -p /etc/pulp
+
+# Create Pulp settings file
+sudo tee /etc/pulp/settings.py << 'EOF'
+CONTENT_ORIGIN = "http://$(hostname -f):24816"
+ALLOWED_HOSTS = ["*"]
+SECRET_KEY = "pulp-secret-key-change-me"
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'pulp',
+        'USER': 'pulp',
+        'PASSWORD': 'pulppassword',
+        'HOST': 'localhost',
+        'PORT': '5432',
+    }
+}
+
+REDIS_URL = "redis://localhost:6379/0"
+
+STATIC_ROOT = "/var/lib/pulp/static/"
+MEDIA_ROOT = "/var/lib/pulp/media/"
+WORKING_DIRECTORY = "/tmp/pulp-tmp"
+
+ANSIBLE_API_HOSTNAME = "http://localhost:24817"
+ANSIBLE_CONTENT_HOSTNAME = "http://localhost:24816/pulp/content"
+EOF
+
+# Set proper ownership
+sudo chown pulp:pulp /etc/pulp/settings.py
+Subtask 2.5: Initialize and Start Pulp Services
+# Run database migrations
+sudo -u pulp PULP_SETTINGS=/etc/pulp/settings.py /var/lib/pulp/pulpvenv/bin/pulpcore-manager migrate --noinput
+
+# Collect static files
+sudo -u pulp PULP_SETTINGS=/etc/pulp/settings.py /var/lib/pulp/pulpvenv/bin/pulpcore-manager collectstatic --noinput
+
+# Create admin user
+sudo -u pulp PULP_SETTINGS=/etc/pulp/settings.py /var/lib/pulp/pulpvenv/bin/pulpcore-manager createsuperuser --username admin --email admin@example.com --noinput
+sudo -u pulp PULP_SETTINGS=/etc/pulp/settings.py /var/lib/pulp/pulpvenv/bin/pulpcore-manager shell -c "from django.contrib.auth import get_user_model; User = get_user_model(); u = User.objects.get(username='admin'); u.set_password('admin123'); u.save()"
+Subtask 2.6: Create Pulp Service Files
+# Create systemd service for Pulp API
+sudo tee /etc/systemd/system/pulpcore-api.service << 'EOF'
+[Unit]
+Description=Pulp WSGI Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=pulp
+Group=pulp
+Environment=PULP_SETTINGS=/etc/pulp/settings.py
+WorkingDirectory=/var/lib/pulp
+ExecStart=/var/lib/pulp/pulpvenv/bin/gunicorn pulpcore.app.wsgi:application --bind 127.0.0.1:24817 --access-logfile -
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Create systemd service for Pulp Content
+sudo tee /etc/systemd/system/pulpcore-content.service << 'EOF'
+[Unit]
+Description=Pulp Content Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=pulp
+Group=pulp
+Environment=PULP_SETTINGS=/etc/pulp/settings.py
+WorkingDirectory=/var/lib/pulp
+ExecStart=/var/lib/pulp/pulpvenv/bin/gunicorn pulpcore.content:server --bind 127.0.0.1:24816 --access-logfile -
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Create systemd service for Pulp Worker
+sudo tee /etc/systemd/system/pulpcore-worker@.service << 'EOF'
+[Unit]
+Description=Pulp Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=pulp
+Group=pulp
+Environment=PULP_SETTINGS=/etc/pulp/settings.py
+WorkingDirectory=/var/lib/pulp
+ExecStart=/var/lib/pulp/pulpvenv/bin/rq worker -w pulpcore.tasking.worker.PulpWorker -c pulpcore.rqconfig
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload systemd and start services
+sudo systemctl daemon-reload
+sudo systemctl enable pulpcore-api pulpcore-content pulpcore-worker@1
+sudo systemctl start pulpcore-api pulpcore-content pulpcore-worker@1
+Task 3: Verify Installation by Logging into Web Interfaces
+Subtask 3.1: Configure Firewall Rules
+# Open required ports for AWX and Pulp
+sudo firewall-cmd --permanent --add-port=8080/tcp  # AWX HTTP
+sudo firewall-cmd --permanent --add-port=8443/tcp  # AWX HTTPS
+sudo firewall-cmd --permanent --add-port=24816/tcp # Pulp Content
+sudo firewall-cmd --permanent --add-port=24817/tcp # Pulp API
+sudo firewall-cmd --reload
+
+# Verify firewall rules
+sudo firewall-cmd --list-ports
+Subtask 3.2: Verify AWX Web Interface
+# Check AWX container status
+docker ps | grep awx
+
+# Test AWX connectivity
+curl -k http://localhost:8080/api/v2/ping/
+
+# Get your server's IP address
+ip addr show | grep inet | grep -v 127.0.0.1 | head -1
+Web Interface Access:
+
+Open your web browser
+Navigate to http://YOUR_SERVER_IP:8080
+Login credentials:
+Username: admin
+Password: ansible123
+Expected Results:
+
+AWX dashboard should load successfully
+You should see the main navigation menu with Projects, Inventories, Templates, etc.
+No error messages should appear
+Subtask 3.3: Verify Pulp Web Interface
+# Check Pulp service status
+sudo systemctl status pulpcore-api pulpcore-content pulpcore-worker@1
+
+# Test Pulp API connectivity
+curl -u admin:admin123 http://localhost:24817/pulp/api/v3/status/
+
+# Test Pulp content server
+curl http://localhost:24816/pulp/api/v3/status/
+API Interface Access:
+
+Open your web browser
+Navigate to http://YOUR_SERVER_IP:24817/pulp/api/v3/
+Login credentials:
+Username: admin
+Password: admin123
+Expected Results:
+
+Pulp API interface should display JSON response
+Status endpoint should return service information
+Authentication should work without errors
+Subtask 3.4: Perform Basic Functionality Tests
+AWX Functionality Test:
+
+# Create a simple project directory
+sudo mkdir -p /tmp/awx_projects/test-project
+sudo chown 1000:1000 /tmp/awx_projects/test-project
+
+# Create a simple playbook
+cat > /tmp/awx_projects/test-project/hello.yml << 'EOF'
+---
+- name: Hello World Playbook
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Print hello message
+      debug:
+        msg: "Hello from Ansible Automation Platform!"
+EOF
+Pulp Functionality Test:
+
+# Test creating a repository via API
+curl -u admin:admin123 -X POST http://localhost:24817/pulp/api/v3/repositories/ansible/ansible/ \
+  -H "Content-Type: application/json" \
+  -d '{"name": "test-repo", "description": "Test repository"}'
+
+# List repositories
+curl -u admin:admin123 http://localhost:24817/pulp/api/v3/repositories/ansible/ansible/
+Troubleshooting Common Issues
+AWX Installation Issues
+Problem: AWX containers fail to start
+
+# Check Docker service status
+sudo systemctl status docker
+
+# Check available disk space
+df -h
+
+# Review AWX logs
+docker-compose -f /tmp/awxcompose/docker-compose.yml logs
+Problem: Cannot access AWX web interface
+
+# Check if AWX is listening on correct port
+sudo netstat -tlnp | grep 8080
+
+# Verify firewall settings
+sudo firewall-cmd --list-all
+
+# Check AWX web container logs
+docker logs awx_web
+Pulp Installation Issues
+Problem: Pulp services fail to start
+
+# Check PostgreSQL connection
+sudo -u pulp PULP_SETTINGS=/etc/pulp/settings.py /var/lib/pulp/pulpvenv/bin/pulpcore-manager shell -c "from django.db import connection; connection.ensure_connection(); print('Database connection successful')"
+
+# Check Redis connection
+redis-cli ping
+
+# Review service logs
+sudo journalctl -u pulpcore-api -f
+Problem: Permission errors
+
+# Fix ownership of Pulp directories
+sudo chown -R pulp:pulp /var/lib/pulp
+sudo chown -R pulp:pulp /etc/pulp
+
+# Check SELinux status (if enabled)
+sudo getenforce
+sudo setsebool -P httpd_can_network_connect 1
+Conclusion
+Congratulations! You have successfully completed Lab 1: Introduction to Ansible Automation Platform. Here's what you accomplished:
+
+Key Achievements
+Installed Ansible Automation Controller (AWX): You deployed the open-source version of Ansible Automation Controller using Docker containers, providing a web-based interface for managing Ansible automation.
+
+Installed Automation Hub (Pulp): You set up Pulp as the content management system for Ansible collections and execution environments, creating a centralized repository for automation content.
+
+Verified Installations: You successfully accessed both web interfaces and confirmed that all services are running correctly with proper authentication.
+
+Configured System Integration: You established the foundational infrastructure including databases, web servers, and networking configurations required for enterprise automation.
+
+Why This Matters
+The Ansible Automation Platform you've just installed represents the foundation of modern IT automation. Here's why these components are crucial:
+
+AWX/Automation Controller provides centralized management, role-based access control, and audit trails for your automation workflows
+Pulp/Automation Hub ensures consistent, versioned, and secure distribution of automation content across your organization
+Integration capabilities allow these tools to work together, creating a comprehensive automation ecosystem
+Next Steps
+With your Ansible Automation Platform now operational, you're ready to:
+
+Create and manage automation projects
+Build and distribute custom Ansible collections
+Implement role-based access controls
+Scale automation across enterprise environments
+This lab has provided you with hands-on experience in deploying enterprise-grade automation infrastructure using open-source tools, preparing you for advanced automation scenarios and the Managing Enterprise Automation with Red Hat Ansible Automation Platform certification path.
+
+Remember: The skills you've developed here are directly applicable to production environments and are highly valued in the current IT automation landscape.

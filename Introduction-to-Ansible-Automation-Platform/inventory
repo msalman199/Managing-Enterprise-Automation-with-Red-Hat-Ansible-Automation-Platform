@@ -1,0 +1,23 @@
+# AWX Configuration
+admin_user=admin
+admin_password=ansible123
+secret_key=awxsecretkey123456789
+database_name=awx
+database_user=awx
+database_password=awxpass
+database_host=postgres
+database_port=5432
+
+# Docker configuration
+docker_compose_dir=/tmp/awxcompose
+pg_username=awx
+pg_password=awxpass
+pg_database=awx
+pg_port=5432
+
+# Web configuration
+host_port=8080
+host_port_ssl=8443
+
+# Project directory
+project_data_dir=/tmp/awx_projects
