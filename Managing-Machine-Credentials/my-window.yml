@@ -1,0 +1,39 @@
+---
+- name: Test Windows Machine Credential
+  hosts: windows
+  gather_facts: yes
+  tasks:
+    - name: Check Windows system information
+      win_shell: |
+        Write-Output "Computer: $env:COMPUTERNAME"
+        Write-Output "OS: $(Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty Caption)"
+        Write-Output "PowerShell Version: $($PSVersionTable.PSVersion.Major).$($PSVersionTable.PSVersion.Minor)"
+      register: system_info
+    
+    - name: Display system information
+      debug:
+        msg: "{{ system_info.stdout_lines }}"
+    
+    - name: Test file creation
+      win_file:
+        path: C:\temp\ansible_test.txt
+        state: touch
+      register: file_result
+    
+    - name: Display file creation result
+      debug:
+        msg: "File creation successful: {{ file_result.changed }}"
+    
+    - name: Test service query
+      win_service_info:
+        name: Spooler
+      register: service_info
+    
+    - name: Display service status
+      debug:
+        msg: "Print Spooler service status: {{ service_info.services[0].state }}"
+    
+    - name: Clean up test file
+      win_file:
+        path: C:\temp\ansible_test.txt
+        state: absent

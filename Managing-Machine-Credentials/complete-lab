@@ -1,0 +1,459 @@
+Lab 4: Managing Machine Credentials
+Objectives
+By the end of this lab, you will be able to:
+
+Understand the importance of machine credentials in Ansible automation
+Create and configure machine credentials for Linux systems
+Create and configure machine credentials for Windows systems
+Test credential functionality using simple playbooks
+Troubleshoot common credential-related issues
+Implement secure credential management practices
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Linux command line operations
+Familiarity with SSH key concepts
+Basic knowledge of Ansible playbooks and YAML syntax
+Understanding of Windows authentication methods
+Completed previous labs in the Ansible Automation Platform series
+Access to Al Nafi cloud-based lab environment
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment. No need to build your own virtual machines or configure complex networking.
+
+Your lab environment includes:
+
+Ansible Automation Platform Controller (AWX)
+Linux target machines (CentOS/RHEL)
+Windows target machines (Windows Server)
+Pre-installed Ansible collections and dependencies
+Task 1: Understanding Machine Credentials
+Subtask 1.1: Overview of Credential Types
+Machine credentials are essential for Ansible to authenticate and connect to managed nodes. Let's explore the different types:
+
+Linux Machine Credentials:
+
+SSH Key-based authentication (recommended)
+Username/password authentication
+Sudo/become privileges configuration
+Windows Machine Credentials:
+
+WinRM (Windows Remote Management)
+Username/password with domain support
+Certificate-based authentication
+Subtask 1.2: Accessing the Automation Controller
+Open your web browser and navigate to the Automation Controller interface
+Log in with your provided credentials
+Navigate to Resources → Credentials in the left sidebar
+# If accessing via command line, ensure AWX CLI is installed
+pip3 install awxkit
+awx --conf.host https://your-controller-url login
+Task 2: Creating Linux Machine Credentials
+Subtask 2.1: Generate SSH Key Pair
+First, let's create an SSH key pair for secure authentication:
+
+Open a terminal on your control machine
+Generate a new SSH key pair:
+# Generate SSH key pair
+ssh-keygen -t rsa -b 4096 -C "ansible-automation" -f ~/.ssh/ansible_key
+
+# Set appropriate permissions
+chmod 600 ~/.ssh/ansible_key
+chmod 644 ~/.ssh/ansible_key.pub
+Display the public key content:
+cat ~/.ssh/ansible_key.pub
+Copy the public key output for later use
+Subtask 2.2: Configure Target Linux Machine
+Access your target Linux machine
+Add the public key to the authorized_keys file:
+# Create .ssh directory if it doesn't exist
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+
+# Add the public key to authorized_keys
+echo "your-public-key-content-here" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+Ensure SSH service is running:
+# Check SSH service status
+sudo systemctl status sshd
+
+# Start SSH service if not running
+sudo systemctl start sshd
+sudo systemctl enable sshd
+Subtask 2.3: Create Linux Credential in Controller
+In the Automation Controller web interface, navigate to Resources → Credentials
+Click the Add button
+Fill in the credential details:
+Basic Information:
+
+Name: Linux-SSH-Credential
+Description: SSH key-based credential for Linux machines
+Organization: Select your organization
+Credential Type: Machine
+Type Details:
+
+Username: ansible (or your target machine username)
+SSH Private Key: Paste the content of your private key
+# To get private key content
+cat ~/.ssh/ansible_key
+Privilege Escalation Method: sudo
+Privilege Escalation Username: root
+Click Save
+Subtask 2.4: Test Linux Credential
+Create a simple test playbook to verify the credential:
+
+Navigate to Resources → Templates
+Click Add → Add job template
+Configure the template:
+Template Configuration:
+
+Name: Test-Linux-Credential
+Job Type: Run
+Inventory: Select your Linux inventory
+Project: Create or select a project
+Playbook: test-linux-connection.yml
+Credentials: Select Linux-SSH-Credential
+Create the test playbook content:
+---
+- name: Test Linux Machine Credential
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Check system information
+      debug:
+        msg: "Connected to {{ ansible_hostname }} running {{ ansible_distribution }} {{ ansible_distribution_version }}"
+    
+    - name: Test file creation with sudo
+      become: yes
+      file:
+        path: /tmp/ansible_test_file
+        state: touch
+        mode: '0644'
+      register: file_result
+    
+    - name: Display file creation result
+      debug:
+        msg: "File creation successful: {{ file_result.changed }}"
+    
+    - name: Clean up test file
+      become: yes
+      file:
+        path: /tmp/ansible_test_file
+        state: absent
+Save and launch the job template
+Task 3: Creating Windows Machine Credentials
+Subtask 3.1: Configure Windows Target Machine
+Access your Windows target machine
+Enable WinRM service:
+# Run as Administrator
+# Enable WinRM
+winrm quickconfig -q
+
+# Configure WinRM for Ansible
+winrm set winrm/config/service/auth '@{Basic="true"}'
+winrm set winrm/config/service '@{AllowUnencrypted="true"}'
+winrm set winrm/config/winrs '@{MaxMemoryPerShellMB="1024"}'
+
+# Create firewall rule
+netsh advfirewall firewall add rule name="WinRM-HTTP" dir=in localport=5985 protocol=TCP action=allow
+Create a local user for Ansible (if needed):
+# Create new user
+net user ansible P@ssw0rd123! /add
+
+# Add to administrators group
+net localgroup administrators ansible /add
+Subtask 3.2: Install Windows Collections
+On your Automation Controller, ensure Windows collections are installed:
+
+# Install Windows collection
+ansible-galaxy collection install ansible.windows
+ansible-galaxy collection install community.windows
+Subtask 3.3: Create Windows Credential in Controller
+In the Automation Controller, navigate to Resources → Credentials
+Click Add
+Configure the Windows credential:
+Basic Information:
+
+Name: Windows-WinRM-Credential
+Description: WinRM credential for Windows machines
+Organization: Select your organization
+Credential Type: Machine
+Type Details:
+
+Username: ansible (or your Windows username)
+Password: P@ssw0rd123! (your Windows password)
+Click Save
+Subtask 3.4: Configure Windows Inventory
+Navigate to Resources → Inventories
+Select your Windows inventory or create a new one
+Add Windows hosts with proper variables:
+# Host variables for Windows machines
+ansible_connection: winrm
+ansible_winrm_transport: basic
+ansible_winrm_server_cert_validation: ignore
+ansible_port: 5985
+Subtask 3.5: Test Windows Credential
+Create a Windows test playbook:
+
+Create a new job template for Windows testing
+Use the following playbook content:
+---
+- name: Test Windows Machine Credential
+  hosts: windows
+  gather_facts: yes
+  tasks:
+    - name: Check Windows system information
+      win_shell: |
+        Write-Output "Computer: $env:COMPUTERNAME"
+        Write-Output "OS: $(Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty Caption)"
+        Write-Output "PowerShell Version: $($PSVersionTable.PSVersion.Major).$($PSVersionTable.PSVersion.Minor)"
+      register: system_info
+    
+    - name: Display system information
+      debug:
+        msg: "{{ system_info.stdout_lines }}"
+    
+    - name: Test file creation
+      win_file:
+        path: C:\temp\ansible_test.txt
+        state: touch
+      register: file_result
+    
+    - name: Display file creation result
+      debug:
+        msg: "File creation successful: {{ file_result.changed }}"
+    
+    - name: Test service query
+      win_service_info:
+        name: Spooler
+      register: service_info
+    
+    - name: Display service status
+      debug:
+        msg: "Print Spooler service status: {{ service_info.services[0].state }}"
+    
+    - name: Clean up test file
+      win_file:
+        path: C:\temp\ansible_test.txt
+        state: absent
+Task 4: Advanced Credential Management
+Subtask 4.1: Using Credential Variables
+Create dynamic credentials using variables:
+
+---
+- name: Dynamic Credential Usage
+  hosts: all
+  vars:
+    ansible_user: "{{ credential_username }}"
+    ansible_ssh_private_key_file: "{{ credential_ssh_key }}"
+  tasks:
+    - name: Display current user
+      debug:
+        msg: "Running as user: {{ ansible_user }}"
+Subtask 4.2: Credential Security Best Practices
+Rotate credentials regularly:
+# Script to rotate SSH keys
+#!/bin/bash
+# Generate new key
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/ansible_key_new
+
+# Update authorized_keys on targets
+ansible all -m authorized_key -a "user=ansible key='{{ lookup('file', '~/.ssh/ansible_key_new.pub') }}' state=present"
+
+# Update credential in Controller
+# (This would be done through the web interface)
+Use vault for sensitive data:
+# Create encrypted vault file
+ansible-vault create group_vars/all/vault.yml
+# Content of vault.yml
+vault_windows_password: "SecureP@ssw0rd123!"
+vault_ssh_key_passphrase: "MySecurePassphrase"
+Subtask 4.3: Testing Multiple Credentials
+Create a comprehensive test playbook:
+
+---
+- name: Comprehensive Credential Test
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Linux-specific tasks
+      block:
+        - name: Check Linux connectivity
+          ping:
+        
+        - name: Test sudo access
+          become: yes
+          command: whoami
+          register: sudo_test
+        
+        - name: Display sudo result
+          debug:
+            msg: "Sudo test result: {{ sudo_test.stdout }}"
+      when: ansible_os_family != "Windows"
+    
+    - name: Windows-specific tasks
+      block:
+        - name: Check Windows connectivity
+          win_ping:
+        
+        - name: Test administrative access
+          win_shell: |
+            $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+            $principal = New-Object System.Security.Principal.WindowsPrincipal($currentUser)
+            $isAdmin = $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+            Write-Output "Is Administrator: $isAdmin"
+          register: admin_test
+        
+        - name: Display admin test result
+          debug:
+            msg: "{{ admin_test.stdout_lines }}"
+      when: ansible_os_family == "Windows"
+Troubleshooting Common Issues
+SSH Connection Issues
+Problem: SSH connection refused Solution:
+
+# Check SSH service
+sudo systemctl status sshd
+
+# Check SSH configuration
+sudo sshd -T | grep -i port
+sudo sshd -T | grep -i permitrootlogin
+
+# Test SSH connection manually
+ssh -i ~/.ssh/ansible_key ansible@target-host
+Problem: Permission denied (publickey) Solution:
+
+# Check key permissions
+ls -la ~/.ssh/ansible_key*
+
+# Verify authorized_keys on target
+ssh target-host "cat ~/.ssh/authorized_keys"
+
+# Check SSH agent
+ssh-add -l
+ssh-add ~/.ssh/ansible_key
+WinRM Connection Issues
+Problem: WinRM connection timeout Solution:
+
+# Check WinRM service
+Get-Service WinRM
+
+# Test WinRM connectivity
+Test-WSMan -ComputerName localhost
+
+# Check firewall rules
+Get-NetFirewallRule -DisplayName "*WinRM*"
+Problem: Authentication failure Solution:
+
+# Check WinRM authentication settings
+winrm get winrm/config/service/auth
+
+# Enable basic authentication if needed
+winrm set winrm/config/service/auth '@{Basic="true"}'
+Controller-Specific Issues
+Problem: Credential not found Solution:
+
+Verify credential exists in Resources → Credentials
+Check credential permissions and organization assignment
+Ensure job template references correct credential
+Problem: Playbook execution fails Solution:
+
+Check job output logs in Views → Jobs
+Verify inventory host variables
+Test credentials manually outside of Controller
+Verification and Testing
+Subtask 5.1: Create Verification Playbook
+---
+- name: Credential Verification Suite
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Collect system facts
+      setup:
+      register: facts
+    
+    - name: Create verification report
+      local_action:
+        module: copy
+        content: |
+          Credential Verification Report
+          =============================
+          Host: {{ inventory_hostname }}
+          OS Family: {{ ansible_os_family }}
+          Distribution: {{ ansible_distribution | default('N/A') }}
+          Version: {{ ansible_distribution_version | default('N/A') }}
+          Architecture: {{ ansible_architecture }}
+          Connection Type: {{ ansible_connection }}
+          User: {{ ansible_user | default(ansible_ssh_user) }}
+          Timestamp: {{ ansible_date_time.iso8601 }}
+          
+          Connection Status: SUCCESS
+        dest: "./verification_{{ inventory_hostname }}.txt"
+      
+    - name: Display success message
+      debug:
+        msg: "Credential verification completed successfully for {{ inventory_hostname }}"
+Subtask 5.2: Performance Testing
+---
+- name: Credential Performance Test
+  hosts: all
+  serial: 5
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: Execute test commands
+      shell: |
+        echo "Testing credential performance"
+        date
+        whoami
+        pwd
+      register: test_output
+    
+    - name: Record end time
+      set_fact:
+        end_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: Calculate execution time
+      debug:
+        msg: "Execution time: {{ (end_time | int) - (start_time | int) }} seconds"
+Lab Summary and Best Practices
+Key Accomplishments
+In this lab, you have successfully:
+
+Created SSH-based credentials for Linux systems with proper key management
+Configured WinRM credentials for Windows systems with secure authentication
+Tested credential functionality using comprehensive playbooks
+Implemented security best practices for credential management
+Troubleshot common issues related to authentication and connectivity
+Security Best Practices Learned
+Use SSH keys instead of passwords for Linux authentication
+Implement proper file permissions for SSH keys (600 for private, 644 for public)
+Rotate credentials regularly to maintain security
+Use Ansible Vault for storing sensitive credential data
+Limit credential scope to necessary systems and users
+Monitor credential usage through Controller audit logs
+Production Considerations
+When implementing credential management in production environments:
+
+Centralized Credential Storage: Use external credential stores like HashiCorp Vault or CyberArk
+Role-Based Access Control: Implement RBAC for credential access
+Audit Logging: Enable comprehensive logging for credential usage
+Automated Rotation: Implement automated credential rotation policies
+Backup and Recovery: Maintain secure backups of credential configurations
+Next Steps
+To continue your Ansible Automation Platform journey:
+
+Explore Custom Credential Types for specialized authentication methods
+Learn about Credential Plugins for dynamic credential retrieval
+Implement Multi-Factor Authentication for enhanced security
+Study Integration Patterns with external identity providers
+Practice Credential Lifecycle Management in enterprise environments
+This lab has provided you with the foundational skills needed to manage machine credentials effectively in Ansible Automation Platform, preparing you for the Managing Enterprise Automation with Red Hat Ansible Automation Platform certification and real-world automation scenarios.
+
+Conclusion
+Managing machine credentials is a critical aspect of enterprise automation that ensures secure, reliable communication between your Automation Controller and managed systems. Through this hands-on lab, you've gained practical experience with both Linux SSH-based and Windows WinRM-based authentication methods.
+
+The skills you've developed here form the foundation for secure automation practices and are essential for maintaining enterprise-grade automation environments. Remember that credential security is an ongoing responsibility that requires regular attention to rotation, monitoring, and access control.
+
+Continue practicing these concepts in your own environment and explore advanced credential management features as you progress in your Ansible automation journey.

@@ -1,0 +1,10 @@
+---
+- name: Dynamic Credential Usage
+  hosts: all
+  vars:
+    ansible_user: "{{ credential_username }}"
+    ansible_ssh_private_key_file: "{{ credential_ssh_key }}"
+  tasks:
+    - name: Display current user
+      debug:
+        msg: "Running as user: {{ ansible_user }}"

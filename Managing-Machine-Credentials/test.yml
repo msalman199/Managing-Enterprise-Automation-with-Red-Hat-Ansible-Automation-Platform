@@ -1,0 +1,26 @@
+---
+- name: Test Linux Machine Credential
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Check system information
+      debug:
+        msg: "Connected to {{ ansible_hostname }} running {{ ansible_distribution }} {{ ansible_distribution_version }}"
+    
+    - name: Test file creation with sudo
+      become: yes
+      file:
+        path: /tmp/ansible_test_file
+        state: touch
+        mode: '0644'
+      register: file_result
+    
+    - name: Display file creation result
+      debug:
+        msg: "File creation successful: {{ file_result.changed }}"
+    
+    - name: Clean up test file
+      become: yes
+      file:
+        path: /tmp/ansible_test_file
+        state: absent
