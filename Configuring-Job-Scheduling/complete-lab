@@ -1,0 +1,720 @@
+Lab 7: Configuring Job Scheduling
+Objectives
+By the end of this lab, students will be able to:
+
+Create and configure automated job templates in Ansible AWX/Tower
+Schedule Ansible jobs to run at specific times or intervals for regular maintenance tasks
+Configure job polling mechanisms to monitor job completion status
+Set up comprehensive notification systems for job status updates
+Implement best practices for enterprise automation scheduling
+Troubleshoot common job scheduling issues
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Ansible playbooks and inventory management
+Familiarity with Linux command line operations
+Knowledge of YAML syntax and structure
+Understanding of cron job concepts
+Basic networking knowledge (SSH, HTTP/HTTPS)
+Completed previous Ansible labs or equivalent experience
+Required Knowledge Areas
+Ansible AWX/Tower interface navigation
+Job template creation and management
+Basic understanding of REST APIs
+Email configuration concepts
+Time zone and scheduling concepts
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment. No need to build your own VM or install software - everything is ready to use!
+
+Environment Details
+Control Node: CentOS 8 with Ansible AWX installed
+Managed Nodes: 2 CentOS 8 servers
+Network: All nodes can communicate with each other
+Tools: AWX Web Interface, command-line tools, text editors
+Task 1: Create and Schedule a Job Template
+Subtask 1.1: Access AWX Web Interface
+Open your web browser and navigate to the AWX interface:
+
+http://your-awx-server-ip
+Log in using the provided credentials:
+
+Username: admin
+Password: password
+Verify the dashboard loads correctly and shows the AWX interface.
+
+Subtask 1.2: Create a Maintenance Playbook
+Connect to your control node via SSH:
+
+ssh ansible@control-node-ip
+Create a directory for maintenance playbooks:
+
+mkdir -p /home/ansible/maintenance-playbooks
+cd /home/ansible/maintenance-playbooks
+Create a system maintenance playbook: ```bash cat > system-maintenance.yml << 'EOF'
+name: System Maintenance Tasks hosts: all become: yes gather_facts: yes
+
+tasks:
+
+name: Update package cache yum: update_cache: yes when: ansible_os_family == "RedHat"
+
+name: Check disk usage shell: df -h register: disk_usage
+
+name: Display disk usage debug: var: disk_usage.stdout_lines
+
+name: Clean temporary files file: path: /tmp/* state: absent ignore_errors: yes
+
+name: Check system uptime command: uptime register: system_uptime
+
+name: Display uptime debug: var: system_uptime.stdout
+
+name: Generate maintenance report copy: content: | Maintenance Report - {{ ansible_date_time.date }} ================================================ Host: {{ inventory_hostname }} Uptime: {{ system_uptime.stdout }} Disk Usage: {{ disk_usage.stdout }} dest: /tmp/maintenance-report-{{ ansible_date_time.date }}.txt delegate_to: localhost
+
+EOF
+
+
+Create an inventory file:
+
+cat > inventory.ini << 'EOF'
+[webservers]
+managed-node-1 ansible_host=managed-node-1-ip
+managed-node-2 ansible_host=managed-node-2-ip
+
+[all:vars]
+ansible_user=ansible
+ansible_ssh_private_key_file=/home/ansible/.ssh/id_rsa
+EOF
+Subtask 1.3: Create Project in AWX
+Navigate to Projects in the AWX web interface:
+
+Click on Projects in the left sidebar
+Click the + button to add a new project
+Configure the project:
+
+Name: Maintenance Project
+Organization: Default
+SCM Type: Manual
+Playbook Directory: /home/ansible/maintenance-playbooks
+Click Save
+Sync the project:
+
+Click the sync button next to your project
+Wait for the sync to complete successfully
+Subtask 1.4: Create Job Template
+Navigate to Templates:
+
+Click on Templates in the left sidebar
+Click + and select Job Template
+Configure the job template:
+
+Name: Daily System Maintenance
+Job Type: Run
+Inventory: Demo Inventory (or create new)
+Project: Maintenance Project
+Playbook: system-maintenance.yml
+Credentials: Demo Credential (or create new)
+Advanced settings:
+
+Check Enable Concurrent Jobs
+Set Job Timeout: 300 seconds
+Check Enable Fact Storage
+Save the template by clicking Save
+
+Subtask 1.5: Create Schedule for Job Template
+Access the job template you just created:
+
+Click on Daily System Maintenance template
+Navigate to Schedules:
+
+Click on the Schedules tab
+Click the + button to add a new schedule
+Configure daily schedule:
+
+Name: Daily Maintenance Schedule
+Start Date/Time: Today's date at 02:00 AM
+Local Time Zone: America/New_York (or your preferred timezone)
+Repeat Frequency: Daily
+Advanced scheduling options:
+
+Run Every: 1 Days
+On Days: Every day
+End: Never
+Save the schedule by clicking Save
+
+Subtask 1.6: Create Weekly Schedule
+Add another schedule for weekly deep maintenance:
+
+Click + to add another schedule
+Configure weekly schedule:
+
+Name: Weekly Deep Maintenance
+Start Date/Time: Next Sunday at 01:00 AM
+Local Time Zone: America/New_York
+Repeat Frequency: Weekly
+Run Every: 1 Weeks
+On Days: Sunday
+Save the weekly schedule
+
+Task 2: Configure Job Polling to Monitor Completion
+Subtask 2.1: Understanding Job Polling Mechanisms
+Job polling allows you to monitor job execution status programmatically. AWX provides several methods:
+
+Web Interface Monitoring: Real-time job status in the GUI
+REST API Polling: Programmatic status checking
+Webhook Integration: Event-driven notifications
+Subtask 2.2: Create Job Monitoring Script
+Create a monitoring script directory:
+
+mkdir -p /home/ansible/monitoring-scripts
+cd /home/ansible/monitoring-scripts
+Create a job polling script:
+
+cat > job-monitor.py << 'EOF'
+#!/usr/bin/env python3
+
+import requests
+import json
+import time
+import sys
+from datetime import datetime
+
+# AWX Configuration
+AWX_HOST = "http://localhost"
+AWX_USERNAME = "admin"
+AWX_PASSWORD = "password"
+
+class AWXJobMonitor:
+    def __init__(self, host, username, password):
+        self.host = host
+        self.username = username
+        self.password = password
+        self.session = requests.Session()
+        self.session.auth = (username, password)
+        self.session.verify = False
+
+    def get_job_status(self, job_id):
+        """Get current status of a job"""
+        url = f"{self.host}/api/v2/jobs/{job_id}/"
+        try:
+            response = self.session.get(url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching job status: {e}")
+            return None
+
+    def poll_job_completion(self, job_id, poll_interval=10, timeout=3600):
+        """Poll job until completion or timeout"""
+        start_time = time.time()
+        print(f"Starting to monitor job {job_id}")
+        
+        while time.time() - start_time < timeout:
+            job_data = self.get_job_status(job_id)
+            
+            if not job_data:
+                print("Failed to get job status")
+                return False
+            
+            status = job_data.get('status')
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Job {job_id} status: {status}")
+            
+            if status in ['successful', 'failed', 'error', 'canceled']:
+                print(f"Job {job_id} completed with status: {status}")
+                self.print_job_summary(job_data)
+                return status == 'successful'
+            
+            time.sleep(poll_interval)
+        
+        print(f"Job {job_id} monitoring timed out after {timeout} seconds")
+        return False
+
+    def print_job_summary(self, job_data):
+        """Print job execution summary"""
+        print("\n" + "="*50)
+        print("JOB EXECUTION SUMMARY")
+        print("="*50)
+        print(f"Job ID: {job_data.get('id')}")
+        print(f"Job Name: {job_data.get('name')}")
+        print(f"Status: {job_data.get('status')}")
+        print(f"Started: {job_data.get('started')}")
+        print(f"Finished: {job_data.get('finished')}")
+        print(f"Elapsed: {job_data.get('elapsed')} seconds")
+        print("="*50)
+
+    def get_recent_jobs(self, template_name=None, limit=5):
+        """Get list of recent jobs"""
+        url = f"{self.host}/api/v2/jobs/"
+        params = {'page_size': limit, 'order_by': '-created'}
+        
+        if template_name:
+            params['job_template__name'] = template_name
+        
+        try:
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            return response.json().get('results', [])
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching recent jobs: {e}")
+            return []
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 job-monitor.py <job_id>")
+        print("   or: python3 job-monitor.py --recent [template_name]")
+        sys.exit(1)
+    
+    monitor = AWXJobMonitor(AWX_HOST, AWX_USERNAME, AWX_PASSWORD)
+    
+    if sys.argv[1] == '--recent':
+        template_name = sys.argv[2] if len(sys.argv) > 2 else None
+        jobs = monitor.get_recent_jobs(template_name)
+        
+        print("Recent Jobs:")
+        print("-" * 80)
+        for job in jobs:
+            print(f"ID: {job['id']:4} | Status: {job['status']:12} | "
+                  f"Name: {job['name']:30} | Started: {job.get('started', 'N/A')}")
+    else:
+        job_id = int(sys.argv[1])
+        success = monitor.poll_job_completion(job_id)
+        sys.exit(0 if success else 1)
+
+if __name__ == "__main__":
+    main()
+EOF
+Make the script executable:
+
+chmod +x job-monitor.py
+Subtask 2.3: Test Job Polling
+Launch a job manually from the AWX interface:
+
+Go to Templates
+Click the rocket icon next to Daily System Maintenance
+Note the job ID from the job details page
+Test the monitoring script:
+
+python3 job-monitor.py <job_id>
+View recent jobs:
+
+python3 job-monitor.py --recent
+Subtask 2.4: Create Automated Polling Service
+Create a systemd service for continuous monitoring:
+
+sudo cat > /etc/systemd/system/awx-job-monitor.service << 'EOF'
+[Unit]
+Description=AWX Job Monitor Service
+After=network.target
+
+[Service]
+Type=simple
+User=ansible
+WorkingDirectory=/home/ansible/monitoring-scripts
+ExecStart=/usr/bin/python3 /home/ansible/monitoring-scripts/continuous-monitor.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+Create the continuous monitoring script:
+
+cat > continuous-monitor.py << 'EOF'
+#!/usr/bin/env python3
+
+import time
+import logging
+from job_monitor import AWXJobMonitor
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/var/log/awx-monitor.log'),
+        logging.StreamHandler()
+    ]
+)
+
+def main():
+    monitor = AWXJobMonitor("http://localhost", "admin", "password")
+    
+    while True:
+        try:
+            # Check for running jobs
+            jobs = monitor.get_recent_jobs(limit=10)
+            running_jobs = [job for job in jobs if job['status'] == 'running']
+            
+            for job in running_jobs:
+                logging.info(f"Monitoring running job: {job['id']} - {job['name']}")
+            
+            time.sleep(60)  # Check every minute
+            
+        except Exception as e:
+            logging.error(f"Error in monitoring loop: {e}")
+            time.sleep(60)
+
+if __name__ == "__main__":
+    main()
+EOF
+Task 3: Set Up Notifications for Job Status
+Subtask 3.1: Configure Email Notifications
+Navigate to Notification Templates in AWX:
+
+Click on Notification Templates in the left sidebar
+Click the + button to create a new notification template
+Create Email Notification Template:
+
+Name: Email Notification
+Organization: Default
+Type: Email
+Configure Email Settings:
+
+Host: smtp.gmail.com (or your SMTP server)
+Port: 587
+Username: your-email@gmail.com
+Password: your-app-password
+Use TLS: Yes
+Sender Email: your-email@gmail.com
+Recipients: admin@company.com, ops-team@company.com
+Test the notification:
+
+Click Test to send a test email
+Verify the email is received
+Subtask 3.2: Configure Slack Notifications
+Create Slack Notification Template:
+
+Click + to add another notification template
+Name: Slack Notifications
+Type: Slack
+Configure Slack Settings:
+
+Destination Channels: #ansible-alerts, #ops-team
+Token: your-slack-bot-token
+Test Slack notification by clicking Test
+
+Subtask 3.3: Create Webhook Notification
+Create a simple webhook receiver:
+
+mkdir -p /home/ansible/webhook-receiver
+cd /home/ansible/webhook-receiver
+Create webhook receiver script:
+
+cat > webhook-receiver.py << 'EOF'
+#!/usr/bin/env python3
+
+from flask import Flask, request, jsonify
+import json
+import logging
+from datetime import datetime
+
+app = Flask(__name__)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/var/log/webhook-receiver.log'),
+        logging.StreamHandler()
+    ]
+)
+
+@app.route('/webhook/job-status', methods=['POST'])
+def job_status_webhook():
+    try:
+        data = request.get_json()
+        
+        # Log the received webhook
+        logging.info(f"Received webhook: {json.dumps(data, indent=2)}")
+        
+        # Extract job information
+        job_id = data.get('id')
+        job_name = data.get('name')
+        job_status = data.get('status')
+        job_url = data.get('url')
+        
+        # Process different job statuses
+        if job_status == 'successful':
+            handle_successful_job(job_id, job_name, data)
+        elif job_status == 'failed':
+            handle_failed_job(job_id, job_name, data)
+        elif job_status == 'running':
+            handle_running_job(job_id, job_name, data)
+        
+        return jsonify({'status': 'received', 'job_id': job_id}), 200
+        
+    except Exception as e:
+        logging.error(f"Error processing webhook: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def handle_successful_job(job_id, job_name, data):
+    """Handle successful job completion"""
+    logging.info(f"Job {job_id} ({job_name}) completed successfully")
+    
+    # Write success report
+    with open(f'/tmp/job-success-{job_id}.log', 'w') as f:
+        f.write(f"Job Success Report\n")
+        f.write(f"==================\n")
+        f.write(f"Job ID: {job_id}\n")
+        f.write(f"Job Name: {job_name}\n")
+        f.write(f"Completed: {datetime.now()}\n")
+        f.write(f"Status: {data.get('status')}\n")
+
+def handle_failed_job(job_id, job_name, data):
+    """Handle failed job"""
+    logging.error(f"Job {job_id} ({job_name}) failed!")
+    
+    # Write failure report
+    with open(f'/tmp/job-failure-{job_id}.log', 'w') as f:
+        f.write(f"Job Failure Report\n")
+        f.write(f"==================\n")
+        f.write(f"Job ID: {job_id}\n")
+        f.write(f"Job Name: {job_name}\n")
+        f.write(f"Failed: {datetime.now()}\n")
+        f.write(f"Status: {data.get('status')}\n")
+        f.write(f"Result Traceback: {data.get('result_traceback', 'N/A')}\n")
+
+def handle_running_job(job_id, job_name, data):
+    """Handle running job notification"""
+    logging.info(f"Job {job_id} ({job_name}) is now running")
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()}), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=False)
+EOF
+Install Flask (if not already installed):
+
+pip3 install flask
+Start the webhook receiver:
+
+python3 webhook-receiver.py &
+Subtask 3.4: Configure Webhook in AWX
+Create Webhook Notification Template:
+
+Name: Webhook Notification
+Type: Webhook
+Target URL: http://localhost:5000/webhook/job-status
+HTTP Method: POST
+Test the webhook by clicking Test
+
+Subtask 3.5: Attach Notifications to Job Template
+Navigate to your job template:
+
+Go to Templates
+Click on Daily System Maintenance
+Configure notifications:
+
+Click on the Notifications tab
+Click + to add notifications
+Add notifications for different events:
+
+On Start: Select Slack Notifications
+On Success: Select Email Notification and Webhook Notification
+On Failure: Select all notification templates
+On Approval: Select Email Notification
+Save the notification settings
+
+Subtask 3.6: Create Custom Notification Script
+Create an advanced notification handler:
+
+cat > /home/ansible/monitoring-scripts/notification-handler.py << 'EOF'
+#!/usr/bin/env python3
+
+import smtplib
+import json
+import requests
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime
+
+class NotificationHandler:
+    def __init__(self, config_file='notification-config.json'):
+        with open(config_file, 'r') as f:
+            self.config = json.load(f)
+    
+    def send_email(self, subject, body, recipients=None):
+        """Send email notification"""
+        if not recipients:
+            recipients = self.config['email']['default_recipients']
+        
+        msg = MIMEMultipart()
+        msg['From'] = self.config['email']['sender']
+        msg['To'] = ', '.join(recipients)
+        msg['Subject'] = subject
+        
+        msg.attach(MIMEText(body, 'html'))
+        
+        try:
+            server = smtplib.SMTP(self.config['email']['smtp_host'], 
+                                self.config['email']['smtp_port'])
+            server.starttls()
+            server.login(self.config['email']['username'], 
+                       self.config['email']['password'])
+            server.send_message(msg)
+            server.quit()
+            print(f"Email sent successfully to {recipients}")
+        except Exception as e:
+            print(f"Failed to send email: {e}")
+    
+    def send_slack_message(self, message, channel=None):
+        """Send Slack notification"""
+        if not channel:
+            channel = self.config['slack']['default_channel']
+        
+        webhook_url = self.config['slack']['webhook_url']
+        payload = {
+            'channel': channel,
+            'text': message,
+            'username': 'Ansible AWX',
+            'icon_emoji': ':robot_face:'
+        }
+        
+        try:
+            response = requests.post(webhook_url, json=payload)
+            response.raise_for_status()
+            print(f"Slack message sent to {channel}")
+        except Exception as e:
+            print(f"Failed to send Slack message: {e}")
+    
+    def format_job_notification(self, job_data, status):
+        """Format job notification message"""
+        job_id = job_data.get('id', 'Unknown')
+        job_name = job_data.get('name', 'Unknown Job')
+        started = job_data.get('started', 'Unknown')
+        finished = job_data.get('finished', 'In Progress')
+        
+        if status == 'success':
+            emoji = '✅'
+            color = 'good'
+        elif status == 'failure':
+            emoji = '❌'
+            color = 'danger'
+        else:
+            emoji = '⏳'
+            color = 'warning'
+        
+        message = f"""
+        {emoji} **Ansible Job {status.title()}**
+        
+        **Job Details:**
+        - Job ID: {job_id}
+        - Job Name: {job_name}
+        - Status: {status.title()}
+        - Started: {started}
+        - Finished: {finished}
+        
+        **Actions:**
+        - View job details in AWX dashboard
+        - Check logs for more information
+        """
+        
+        return message
+    
+    def notify_job_status(self, job_data, status):
+        """Send notifications for job status"""
+        message = self.format_job_notification(job_data, status)
+        
+        # Send email for failures and successes
+        if status in ['success', 'failure']:
+            subject = f"Ansible Job {status.title()}: {job_data.get('name', 'Unknown')}"
+            self.send_email(subject, message)
+        
+        # Send Slack for all status updates
+        self.send_slack_message(message)
+
+# Example usage
+if __name__ == "__main__":
+    # Sample job data
+    job_data = {
+        'id': 123,
+        'name': 'Daily System Maintenance',
+        'status': 'successful',
+        'started': '2024-01-15T02:00:00Z',
+        'finished': '2024-01-15T02:15:00Z'
+    }
+    
+    handler = NotificationHandler()
+    handler.notify_job_status(job_data, 'success')
+EOF
+Create notification configuration:
+
+cat > /home/ansible/monitoring-scripts/notification-config.json << 'EOF'
+{
+    "email": {
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 587,
+        "username": "your-email@gmail.com",
+        "password": "your-app-password",
+        "sender": "ansible-awx@company.com",
+        "default_recipients": ["admin@company.com", "ops-team@company.com"]
+    },
+    "slack": {
+        "webhook_url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+        "default_channel": "#ansible-alerts"
+    }
+}
+EOF
+Testing and Validation
+Test Scheduled Jobs
+Verify scheduled jobs are created:
+
+Go to Jobs in AWX interface
+Look for scheduled job executions
+Check job execution logs:
+
+Click on a completed job
+Review the Output tab for execution details
+Validate notifications:
+
+Check email inbox for job notifications
+Verify Slack messages in configured channels
+Check webhook receiver logs
+Test Job Polling
+Run the monitoring script during job execution:
+
+python3 /home/ansible/monitoring-scripts/job-monitor.py --recent
+Check monitoring logs:
+
+tail -f /var/log/awx-monitor.log
+Troubleshooting Common Issues
+Issue 1: Jobs not scheduling
+
+Check AWX service status: sudo systemctl status awx
+Verify time zone settings in AWX
+Check schedule configuration for correct dates/times
+Issue 2: Notifications not working
+
+Test notification templates individually
+Check SMTP/Slack credentials
+Verify network connectivity
+Issue 3: Polling script errors
+
+Check AWX API accessibility
+Verify authentication credentials
+Check Python dependencies
+Conclusion
+In this comprehensive lab, you have successfully:
+
+Created automated job templates that can run system maintenance tasks on a scheduled basis
+Implemented job scheduling with both daily and weekly maintenance windows
+Configured job polling mechanisms to monitor job execution status programmatically
+Set up comprehensive notification systems including email, Slack, and webhook notifications
+Built monitoring scripts that can track job progress and provide detailed status reports
+Why This Matters
+Enterprise Automation: Job scheduling is crucial for enterprise environments where maintenance tasks must run during off-hours without manual intervention.
+
+Operational Visibility: Proper monitoring and notifications ensure that operations teams are immediately aware of job status, enabling quick response to issues.
+
+Compliance and Reporting: Automated scheduling and monitoring help maintain compliance with maintenance windows and provide audit trails for regulatory requirements.
+
+Scalability: These techniques allow you to manage hundreds of servers and thousands of jobs efficiently, making your automation platform truly enterprise-ready.
+
+Next Steps
+Explore advanced scheduling patterns (monthly, quarterly)
+Implement job dependencies and workflows
+Set up centralized logging and metrics collection
+Create custom job templates for specific business requirements
+Integrate with external monitoring systems like Prometheus or Grafana
+You now have the skills to implement robust, enterprise-grade job scheduling and monitoring in your Ansible automation environment!

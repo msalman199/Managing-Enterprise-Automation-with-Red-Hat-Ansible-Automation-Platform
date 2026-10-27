@@ -1,0 +1,17 @@
+name: System Maintenance Tasks hosts: all become: yes gather_facts: yes
+
+tasks:
+
+name: Update package cache yum: update_cache: yes when: ansible_os_family == "RedHat"
+
+name: Check disk usage shell: df -h register: disk_usage
+
+name: Display disk usage debug: var: disk_usage.stdout_lines
+
+name: Clean temporary files file: path: /tmp/* state: absent ignore_errors: yes
+
+name: Check system uptime command: uptime register: system_uptime
+
+name: Display uptime debug: var: system_uptime.stdout
+
+name: Generate maintenance report copy: content: | Maintenance Report - {{ ansible_date_time.date }} ================================================ Host: {{ inventory_hostname }} Uptime: {{ system_uptime.stdout }} Disk Usage: {{ disk_usage.stdout }} dest: /tmp/maintenance-report-{{ ansible_date_time.date }}.txt delegate_to: localhost
