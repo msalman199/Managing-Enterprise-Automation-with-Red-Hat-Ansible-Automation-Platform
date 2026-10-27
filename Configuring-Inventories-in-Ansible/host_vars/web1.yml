@@ -1,0 +1,14 @@
+# Host-specific variables for web1
+server_memory: 4GB
+cpu_cores: 2
+disk_space: 50GB
+
+# Application-specific
+app_version: "2.1.0"
+custom_modules:
+  - mod_rewrite
+  - mod_ssl
+  - mod_headers
+
+# Maintenance window
+maintenance_window: "Sunday 02:00-04:00"

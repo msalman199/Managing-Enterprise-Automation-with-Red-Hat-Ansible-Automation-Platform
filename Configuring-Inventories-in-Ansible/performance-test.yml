@@ -1,0 +1,33 @@
+---
+- name: Inventory Performance Test
+  hosts: all
+  gather_facts: no
+  serial: 5  # Process 5 hosts at a time
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+      run_once: true
+      delegate_to: localhost
+
+    - name: Test basic connectivity
+      ping:
+      register: ping_result
+
+    - name: Gather minimal facts
+      setup:
+        filter: ansible_hostname
+      register: facts_result
+
+    - name: Calculate response time
+      set_fact:
+        response_time: "{{ (ansible_date_time.epoch | int) - (start_time | int) }}"
+
+    - name: Display performance metrics
+      debug:
+        msg: |
+          Host: {{ inventory_hostname }}
+          Ping Status: {{ 'Success' if ping_result is succeeded else 'Failed' }}
+          Response Time: {{ response_time }}s
+          Hostname: {{ ansible_hostname | default('Unknown') }}
+      when: inventory_hostname in ansible_play_hosts[:3]  # Show first 3 hosts only

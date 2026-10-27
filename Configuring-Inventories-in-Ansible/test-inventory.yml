@@ -1,0 +1,42 @@
+---
+- name: Test Inventory Functionality
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Display host information
+      debug:
+        msg: |
+          Hostname: {{ inventory_hostname }}
+          Ansible Host: {{ ansible_host | default('Not defined') }}
+          Groups: {{ group_names }}
+          Server Role: {{ server_role | default('Not defined') }}
+          Environment: {{ environment | default('Not defined') }}
+
+    - name: Show all host variables
+      debug:
+        var: hostvars[inventory_hostname]
+      when: inventory_hostname == ansible_play_hosts[0]
+
+    - name: Test group membership
+      debug:
+        msg: "This host belongs to the webservers group"
+      when: "'webservers' in group_names"
+
+    - name: Test variable inheritance
+      debug:
+        msg: |
+          HTTP Port: {{ http_port | default('Not defined') }}
+          Server ID: {{ server_id | default('Not defined') }}
+          Monitoring: {{ monitoring_enabled | default('Not defined') }}
+
+    - name: Gather system information
+      setup:
+        filter: ansible_distribution*
+      register: system_info
+
+    - name: Display system information
+      debug:
+        msg: |
+          Distribution: {{ ansible_distribution }}
+          Version: {{ ansible_distribution_version }}
+          Architecture: {{ ansible_architecture }}

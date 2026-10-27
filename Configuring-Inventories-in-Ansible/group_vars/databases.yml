@@ -1,0 +1,13 @@
+# Database configuration
+db_root_password: "{{ vault_db_root_password }}"
+db_backup_enabled: true
+db_backup_retention_days: 30
+
+# Performance tuning
+max_connections: 100
+innodb_buffer_pool_size: 1G
+query_cache_size: 64M
+
+# Security
+db_firewall_enabled: true
+db_ssl_enabled: true

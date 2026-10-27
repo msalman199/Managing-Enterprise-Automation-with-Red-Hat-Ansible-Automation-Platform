@@ -1,0 +1,52 @@
+plugin: aws_ec2
+regions:
+  - us-east-1
+  - us-west-2
+
+# Only include running instances
+filters:
+  instance-state-name: running
+
+# Organize hosts into groups
+keyed_groups:
+  # Group by instance type
+  - key: instance_type
+    prefix: type
+    separator: "_"
+  
+  # Group by environment tag
+  - key: tags.Environment | default('untagged')
+    prefix: env
+    separator: "_"
+  
+  # Group by role tag
+  - key: tags.Role | default('norole')
+    prefix: role
+    separator: "_"
+  
+  # Group by availability zone
+  - key: placement.availability_zone
+    prefix: az
+    separator: "_"
+
+# Compose variables for each host
+compose:
+  ansible_host: public_ip_address | default(private_ip_address)
+  ec2_instance_type: instance_type
+  ec2_placement_az: placement.availability_zone
+  ec2_security_groups: security_groups | map(attribute='group_name') | list
+  ec2_vpc_id: vpc_id
+  ec2_subnet_id: subnet_id
+
+# Use tags as host variables
+hostnames:
+  - tag:Name
+  - instance-id
+  - public-ip-address
+  - private-ip-address
+
+# Cache inventory for better performance
+cache: True
+cache_plugin: jsonfile
+cache_timeout: 3600
+cache_connection: /tmp/ansible_inventory_cache

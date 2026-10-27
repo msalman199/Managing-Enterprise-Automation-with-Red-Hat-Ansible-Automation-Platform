@@ -1,0 +1,58 @@
+all:
+  vars:
+    ansible_ssh_private_key_file: /home/ansible/.ssh/id_rsa
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+  children:
+    production:
+      children:
+        webservers:
+          vars:
+            http_port: 80
+            https_port: 443
+            server_role: web
+          hosts:
+            web1:
+              ansible_host: 192.168.1.10
+              ansible_user: ansible
+              server_id: web-prod-01
+            web2:
+              ansible_host: 192.168.1.11
+              ansible_user: ansible
+              server_id: web-prod-02
+        databases:
+          vars:
+            db_port: 3306
+            server_role: database
+            backup_schedule: "0 2 * * *"
+          hosts:
+            db1:
+              ansible_host: 192.168.1.20
+              ansible_user: ansible
+              server_id: db-prod-01
+              db_type: mysql
+            db2:
+              ansible_host: 192.168.1.21
+              ansible_user: ansible
+              server_id: db-prod-02
+              db_type: postgresql
+        loadbalancers:
+          vars:
+            lb_algorithm: round_robin
+            server_role: loadbalancer
+          hosts:
+            lb1:
+              ansible_host: 192.168.1.30
+              ansible_user: ansible
+              server_id: lb-prod-01
+    staging:
+      children:
+        webservers_staging:
+          vars:
+            http_port: 8080
+            server_role: web
+            environment: staging
+          hosts:
+            web-staging:
+              ansible_host: 192.168.1.40
+              ansible_user: ansible
+              server_id: web-staging-01

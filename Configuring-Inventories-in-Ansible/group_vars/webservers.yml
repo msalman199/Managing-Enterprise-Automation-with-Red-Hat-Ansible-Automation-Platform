@@ -1,0 +1,16 @@
+# Webserver configuration variables
+web_server_package: httpd
+web_server_service: httpd
+document_root: /var/www/html
+log_level: warn
+max_connections: 150
+
+# Security settings
+firewall_enabled: true
+ssl_enabled: true
+ssl_cert_path: /etc/ssl/certs/server.crt
+ssl_key_path: /etc/ssl/private/server.key
+
+# Monitoring
+monitoring_enabled: true
+log_rotation: daily

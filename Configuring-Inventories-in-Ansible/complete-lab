@@ -1,0 +1,655 @@
+Lab 3: Configuring Inventories in Ansible
+Objectives
+By the end of this lab, you will be able to:
+
+Understand the difference between static and dynamic inventories in Ansible
+Create and configure static inventory files in YAML format
+Set up dynamic inventories using cloud providers
+Test inventory functionality using Ansible commands
+Organize hosts into groups and apply variables at different levels
+Troubleshoot common inventory configuration issues
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of YAML syntax
+Familiarity with Linux command line operations
+Basic knowledge of Ansible concepts (playbooks, modules, tasks)
+Understanding of SSH key-based authentication
+Basic networking concepts (IP addresses, hostnames)
+Completed Lab 1 and Lab 2 of this Ansible series
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment. No need to build your own virtual machines or install software - everything is ready to use!
+
+Your lab environment includes:
+
+Control Node: CentOS 8 with Ansible pre-installed
+Managed Nodes: 3 CentOS 8 servers for testing
+Cloud Integration: Pre-configured AWS CLI for dynamic inventory testing
+Task 1: Create a Static Inventory File in YAML
+Subtask 1.1: Understanding Inventory Basics
+Static inventories are manually created files that define which hosts Ansible should manage. They can be written in INI format or YAML format.
+
+Key Concepts:
+
+Hosts: Individual servers that Ansible manages
+Groups: Collections of hosts that share common characteristics
+Variables: Configuration data that can be applied to hosts or groups
+Subtask 1.2: Create Basic Static Inventory Structure
+Connect to your control node and navigate to your working directory:
+cd /home/ansible
+mkdir lab3-inventories
+cd lab3-inventories
+Create your first static inventory file in YAML format:
+nano static-inventory.yml
+Add the following basic inventory structure:
+all:
+  children:
+    webservers:
+      hosts:
+        web1:
+          ansible_host: 192.168.1.10
+          ansible_user: ansible
+        web2:
+          ansible_host: 192.168.1.11
+          ansible_user: ansible
+    databases:
+      hosts:
+        db1:
+          ansible_host: 192.168.1.20
+          ansible_user: ansible
+        db2:
+          ansible_host: 192.168.1.21
+          ansible_user: ansible
+    loadbalancers:
+      hosts:
+        lb1:
+          ansible_host: 192.168.1.30
+          ansible_user: ansible
+Save and exit the file (Ctrl+X, then Y, then Enter).
+Subtask 1.3: Add Group and Host Variables
+Create an enhanced inventory with variables:
+nano advanced-static-inventory.yml
+Add the following comprehensive inventory:
+all:
+  vars:
+    ansible_ssh_private_key_file: /home/ansible/.ssh/id_rsa
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+  children:
+    production:
+      children:
+        webservers:
+          vars:
+            http_port: 80
+            https_port: 443
+            server_role: web
+          hosts:
+            web1:
+              ansible_host: 192.168.1.10
+              ansible_user: ansible
+              server_id: web-prod-01
+            web2:
+              ansible_host: 192.168.1.11
+              ansible_user: ansible
+              server_id: web-prod-02
+        databases:
+          vars:
+            db_port: 3306
+            server_role: database
+            backup_schedule: "0 2 * * *"
+          hosts:
+            db1:
+              ansible_host: 192.168.1.20
+              ansible_user: ansible
+              server_id: db-prod-01
+              db_type: mysql
+            db2:
+              ansible_host: 192.168.1.21
+              ansible_user: ansible
+              server_id: db-prod-02
+              db_type: postgresql
+        loadbalancers:
+          vars:
+            lb_algorithm: round_robin
+            server_role: loadbalancer
+          hosts:
+            lb1:
+              ansible_host: 192.168.1.30
+              ansible_user: ansible
+              server_id: lb-prod-01
+    staging:
+      children:
+        webservers_staging:
+          vars:
+            http_port: 8080
+            server_role: web
+            environment: staging
+          hosts:
+            web-staging:
+              ansible_host: 192.168.1.40
+              ansible_user: ansible
+              server_id: web-staging-01
+Save and exit the file.
+Subtask 1.4: Create Host and Group Variable Files
+Create directory structure for variable files:
+mkdir -p group_vars host_vars
+Create group variables for webservers:
+nano group_vars/webservers.yml
+Add webserver-specific variables:
+# Webserver configuration variables
+web_server_package: httpd
+web_server_service: httpd
+document_root: /var/www/html
+log_level: warn
+max_connections: 150
+
+# Security settings
+firewall_enabled: true
+ssl_enabled: true
+ssl_cert_path: /etc/ssl/certs/server.crt
+ssl_key_path: /etc/ssl/private/server.key
+
+# Monitoring
+monitoring_enabled: true
+log_rotation: daily
+Create group variables for databases:
+nano group_vars/databases.yml
+Add database-specific variables:
+# Database configuration
+db_root_password: "{{ vault_db_root_password }}"
+db_backup_enabled: true
+db_backup_retention_days: 30
+
+# Performance tuning
+max_connections: 100
+innodb_buffer_pool_size: 1G
+query_cache_size: 64M
+
+# Security
+db_firewall_enabled: true
+db_ssl_enabled: true
+Create host-specific variables for web1:
+nano host_vars/web1.yml
+Add host-specific configuration:
+# Host-specific variables for web1
+server_memory: 4GB
+cpu_cores: 2
+disk_space: 50GB
+
+# Application-specific
+app_version: "2.1.0"
+custom_modules:
+  - mod_rewrite
+  - mod_ssl
+  - mod_headers
+
+# Maintenance window
+maintenance_window: "Sunday 02:00-04:00"
+Task 2: Set Up Dynamic Inventory Using External Cloud Provider
+Subtask 2.1: Understanding Dynamic Inventories
+Dynamic inventories automatically discover and organize hosts from external sources like cloud providers, databases, or APIs. This eliminates the need to manually maintain static inventory files.
+
+Benefits of Dynamic Inventories:
+
+Automatically updated as infrastructure changes
+Reduces manual maintenance overhead
+Integrates with cloud provider metadata
+Supports auto-scaling environments
+Subtask 2.2: Configure AWS Dynamic Inventory
+Install required Python packages:
+sudo pip3 install boto3 botocore
+Create AWS credentials file (using demo credentials for lab):
+mkdir -p ~/.aws
+nano ~/.aws/credentials
+Add AWS credentials (lab environment provides these):
+[default]
+aws_access_key_id = AKIA_DEMO_ACCESS_KEY
+aws_secret_access_key = demo_secret_access_key_12345
+region = us-east-1
+Create AWS configuration file:
+nano ~/.aws/config
+Add AWS configuration:
+[default]
+region = us-east-1
+output = json
+Subtask 2.3: Create AWS Dynamic Inventory Script
+Create the dynamic inventory script:
+nano aws_ec2_inventory.py
+Add the following Python script:
+#!/usr/bin/env python3
+
+import json
+import boto3
+import sys
+from botocore.exceptions import ClientError
+
+def get_ec2_instances():
+    """Retrieve EC2 instances and organize them into Ansible inventory format"""
+    
+    try:
+        ec2 = boto3.client('ec2')
+        response = ec2.describe_instances()
+        
+        inventory = {
+            '_meta': {
+                'hostvars': {}
+            },
+            'all': {
+                'children': ['ungrouped']
+            },
+            'ungrouped': {
+                'hosts': []
+            }
+        }
+        
+        # Group hosts by tags and instance state
+        groups = {}
+        
+        for reservation in response['Reservations']:
+            for instance in reservation['Instances']:
+                if instance['State']['Name'] != 'running':
+                    continue
+                
+                # Get instance details
+                instance_id = instance['InstanceId']
+                private_ip = instance.get('PrivateIpAddress', '')
+                public_ip = instance.get('PublicIpAddress', '')
+                instance_type = instance['InstanceType']
+                
+                # Use public IP if available, otherwise private IP
+                host_ip = public_ip if public_ip else private_ip
+                
+                if not host_ip:
+                    continue
+                
+                # Add to hostvars
+                inventory['_meta']['hostvars'][host_ip] = {
+                    'ansible_host': host_ip,
+                    'ec2_instance_id': instance_id,
+                    'ec2_instance_type': instance_type,
+                    'ec2_private_ip': private_ip,
+                    'ec2_public_ip': public_ip,
+                    'ec2_state': instance['State']['Name']
+                }
+                
+                # Process tags for grouping
+                tags = {tag['Key']: tag['Value'] for tag in instance.get('Tags', [])}
+                
+                # Group by Name tag
+                if 'Name' in tags:
+                    name_group = f"tag_Name_{tags['Name'].replace(' ', '_').replace('-', '_')}"
+                    if name_group not in groups:
+                        groups[name_group] = []
+                    groups[name_group].append(host_ip)
+                
+                # Group by Environment tag
+                if 'Environment' in tags:
+                    env_group = f"env_{tags['Environment']}"
+                    if env_group not in groups:
+                        groups[env_group] = []
+                    groups[env_group].append(host_ip)
+                
+                # Group by Role tag
+                if 'Role' in tags:
+                    role_group = f"role_{tags['Role']}"
+                    if role_group not in groups:
+                        groups[role_group] = []
+                    groups[role_group].append(host_ip)
+                
+                # Group by instance type
+                type_group = f"type_{instance_type.replace('.', '_')}"
+                if type_group not in groups:
+                    groups[type_group] = []
+                groups[type_group].append(host_ip)
+                
+                # Add tags to hostvars
+                for key, value in tags.items():
+                    inventory['_meta']['hostvars'][host_ip][f'ec2_tag_{key}'] = value
+        
+        # Add groups to inventory
+        for group_name, hosts in groups.items():
+            inventory[group_name] = {
+                'hosts': hosts
+            }
+            
+        return inventory
+        
+    except ClientError as e:
+        print(f"Error connecting to AWS: {e}", file=sys.stderr)
+        return {'_meta': {'hostvars': {}}}
+    except Exception as e:
+        print(f"Unexpected error: {e}", file=sys.stderr)
+        return {'_meta': {'hostvars': {}}}
+
+def main():
+    """Main function to handle command line arguments"""
+    if len(sys.argv) == 2 and sys.argv[1] == '--list':
+        inventory = get_ec2_instances()
+        print(json.dumps(inventory, indent=2))
+    elif len(sys.argv) == 3 and sys.argv[1] == '--host':
+        # Return empty dict for host-specific vars (we use _meta)
+        print(json.dumps({}))
+    else:
+        print("Usage: aws_ec2_inventory.py --list")
+        print("       aws_ec2_inventory.py --host <hostname>")
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
+Make the script executable:
+chmod +x aws_ec2_inventory.py
+Subtask 2.4: Create Ansible Configuration for Dynamic Inventory
+Create an ansible.cfg file for dynamic inventory:
+nano ansible-dynamic.cfg
+Add configuration for dynamic inventory:
+[defaults]
+inventory = aws_ec2_inventory.py
+host_key_checking = False
+remote_user = ec2-user
+private_key_file = ~/.ssh/id_rsa
+timeout = 30
+gathering = smart
+fact_caching = jsonfile
+fact_caching_connection = /tmp/ansible_facts_cache
+fact_caching_timeout = 3600
+
+[inventory]
+enable_plugins = aws_ec2, host_list, script, auto, yaml, ini, toml
+
+[ssh_connection]
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=no
+pipelining = True
+Subtask 2.5: Alternative - Using Ansible AWS EC2 Plugin
+Create a plugin-based inventory file:
+nano aws_ec2.yml
+Add AWS EC2 plugin configuration:
+plugin: aws_ec2
+regions:
+  - us-east-1
+  - us-west-2
+
+# Only include running instances
+filters:
+  instance-state-name: running
+
+# Organize hosts into groups
+keyed_groups:
+  # Group by instance type
+  - key: instance_type
+    prefix: type
+    separator: "_"
+  
+  # Group by environment tag
+  - key: tags.Environment | default('untagged')
+    prefix: env
+    separator: "_"
+  
+  # Group by role tag
+  - key: tags.Role | default('norole')
+    prefix: role
+    separator: "_"
+  
+  # Group by availability zone
+  - key: placement.availability_zone
+    prefix: az
+    separator: "_"
+
+# Compose variables for each host
+compose:
+  ansible_host: public_ip_address | default(private_ip_address)
+  ec2_instance_type: instance_type
+  ec2_placement_az: placement.availability_zone
+  ec2_security_groups: security_groups | map(attribute='group_name') | list
+  ec2_vpc_id: vpc_id
+  ec2_subnet_id: subnet_id
+
+# Use tags as host variables
+hostnames:
+  - tag:Name
+  - instance-id
+  - public-ip-address
+  - private-ip-address
+
+# Cache inventory for better performance
+cache: True
+cache_plugin: jsonfile
+cache_timeout: 3600
+cache_connection: /tmp/ansible_inventory_cache
+Task 3: Test Inventory Functionality with Ansible Commands
+Subtask 3.1: Test Static Inventory
+List all hosts in static inventory:
+ansible-inventory -i static-inventory.yml --list
+List hosts in specific groups:
+ansible-inventory -i static-inventory.yml --list --limit webservers
+Show host variables for a specific host:
+ansible-inventory -i advanced-static-inventory.yml --host web1
+Test connectivity to static inventory hosts:
+ansible -i static-inventory.yml all -m ping
+Run a simple command on webservers group:
+ansible -i static-inventory.yml webservers -m command -a "uptime"
+Subtask 3.2: Test Dynamic Inventory
+Test the dynamic inventory script:
+./aws_ec2_inventory.py --list
+Use dynamic inventory with ansible commands:
+ANSIBLE_CONFIG=ansible-dynamic.cfg ansible-inventory --list
+Test connectivity using dynamic inventory:
+ANSIBLE_CONFIG=ansible-dynamic.cfg ansible all -m ping
+List hosts by dynamic groups:
+ANSIBLE_CONFIG=ansible-dynamic.cfg ansible-inventory --list --limit role_webserver
+Subtask 3.3: Advanced Inventory Testing
+Create a test playbook to verify inventory functionality:
+nano test-inventory.yml
+Add comprehensive inventory test playbook:
+---
+- name: Test Inventory Functionality
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Display host information
+      debug:
+        msg: |
+          Hostname: {{ inventory_hostname }}
+          Ansible Host: {{ ansible_host | default('Not defined') }}
+          Groups: {{ group_names }}
+          Server Role: {{ server_role | default('Not defined') }}
+          Environment: {{ environment | default('Not defined') }}
+
+    - name: Show all host variables
+      debug:
+        var: hostvars[inventory_hostname]
+      when: inventory_hostname == ansible_play_hosts[0]
+
+    - name: Test group membership
+      debug:
+        msg: "This host belongs to the webservers group"
+      when: "'webservers' in group_names"
+
+    - name: Test variable inheritance
+      debug:
+        msg: |
+          HTTP Port: {{ http_port | default('Not defined') }}
+          Server ID: {{ server_id | default('Not defined') }}
+          Monitoring: {{ monitoring_enabled | default('Not defined') }}
+
+    - name: Gather system information
+      setup:
+        filter: ansible_distribution*
+      register: system_info
+
+    - name: Display system information
+      debug:
+        msg: |
+          Distribution: {{ ansible_distribution }}
+          Version: {{ ansible_distribution_version }}
+          Architecture: {{ ansible_architecture }}
+Run the test playbook with static inventory:
+ansible-playbook -i advanced-static-inventory.yml test-inventory.yml
+Run the test playbook with dynamic inventory:
+ANSIBLE_CONFIG=ansible-dynamic.cfg ansible-playbook test-inventory.yml
+Subtask 3.4: Inventory Validation and Troubleshooting
+Validate inventory syntax:
+ansible-inventory -i advanced-static-inventory.yml --list --yaml
+Check for inventory parsing errors:
+ansible-inventory -i advanced-static-inventory.yml --list -v
+Create a troubleshooting script:
+nano inventory-troubleshoot.sh
+Add troubleshooting commands:
+#!/bin/bash
+
+echo "=== Ansible Inventory Troubleshooting ==="
+echo
+
+echo "1. Checking Ansible version:"
+ansible --version
+echo
+
+echo "2. Testing static inventory parsing:"
+ansible-inventory -i static-inventory.yml --list > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo "✓ Static inventory parsed successfully"
+else
+    echo "✗ Static inventory parsing failed"
+    ansible-inventory -i static-inventory.yml --list
+fi
+echo
+
+echo "3. Testing host connectivity (static):"
+ansible -i static-inventory.yml all -m ping --one-line 2>/dev/null || echo "✗ Some hosts unreachable"
+echo
+
+echo "4. Checking group definitions:"
+echo "Available groups in static inventory:"
+ansible-inventory -i static-inventory.yml --list | jq -r 'keys[]' | grep -v "_meta" | sort
+echo
+
+echo "5. Testing dynamic inventory:"
+if [ -f "aws_ec2_inventory.py" ]; then
+    ./aws_ec2_inventory.py --list > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo "✓ Dynamic inventory script working"
+    else
+        echo "✗ Dynamic inventory script failed"
+    fi
+else
+    echo "✗ Dynamic inventory script not found"
+fi
+echo
+
+echo "6. Checking SSH connectivity:"
+echo "Testing SSH key permissions:"
+ls -la ~/.ssh/id_rsa 2>/dev/null || echo "✗ SSH private key not found"
+echo
+
+echo "=== Troubleshooting Complete ==="
+Make the script executable and run it:
+chmod +x inventory-troubleshoot.sh
+./inventory-troubleshoot.sh
+Subtask 3.5: Performance Testing and Optimization
+Create a performance test playbook:
+nano performance-test.yml
+Add performance testing tasks:
+---
+- name: Inventory Performance Test
+  hosts: all
+  gather_facts: no
+  serial: 5  # Process 5 hosts at a time
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+      run_once: true
+      delegate_to: localhost
+
+    - name: Test basic connectivity
+      ping:
+      register: ping_result
+
+    - name: Gather minimal facts
+      setup:
+        filter: ansible_hostname
+      register: facts_result
+
+    - name: Calculate response time
+      set_fact:
+        response_time: "{{ (ansible_date_time.epoch | int) - (start_time | int) }}"
+
+    - name: Display performance metrics
+      debug:
+        msg: |
+          Host: {{ inventory_hostname }}
+          Ping Status: {{ 'Success' if ping_result is succeeded else 'Failed' }}
+          Response Time: {{ response_time }}s
+          Hostname: {{ ansible_hostname | default('Unknown') }}
+      when: inventory_hostname in ansible_play_hosts[:3]  # Show first 3 hosts only
+Run performance test:
+time ansible-playbook -i advanced-static-inventory.yml performance-test.yml
+Common Troubleshooting Issues
+Issue 1: YAML Syntax Errors
+Problem: Inventory file fails to parse due to YAML syntax errors.
+
+Solution:
+
+# Validate YAML syntax
+python3 -c "import yaml; yaml.safe_load(open('advanced-static-inventory.yml'))"
+
+# Use ansible-inventory to check parsing
+ansible-inventory -i advanced-static-inventory.yml --list --yaml
+Issue 2: SSH Connection Failures
+Problem: Cannot connect to managed hosts.
+
+Solution:
+
+# Test SSH connectivity manually
+ssh -i ~/.ssh/id_rsa ansible@192.168.1.10
+
+# Check SSH key permissions
+chmod 600 ~/.ssh/id_rsa
+
+# Add SSH debugging to ansible.cfg
+[ssh_connection]
+ssh_args = -vvv -o ControlMaster=auto -o ControlPersist=60s
+Issue 3: Dynamic Inventory Not Working
+Problem: AWS dynamic inventory returns empty results.
+
+Solution:
+
+# Check AWS credentials
+aws sts get-caller-identity
+
+# Test boto3 connection
+python3 -c "import boto3; print(boto3.client('ec2').describe_instances())"
+
+# Enable debug mode
+./aws_ec2_inventory.py --list 2>&1 | head -20
+Issue 4: Variable Precedence Issues
+Problem: Variables not applying as expected.
+
+Solution:
+
+# Check variable precedence
+ansible-inventory -i advanced-static-inventory.yml --host web1 | jq .
+
+# Test variable resolution in playbook
+ansible -i advanced-static-inventory.yml web1 -m debug -a "var=hostvars[inventory_hostname]"
+Conclusion
+In this comprehensive lab, you have successfully:
+
+Created static inventories in YAML format with proper organization of hosts, groups, and variables
+Implemented dynamic inventories using AWS EC2 as an external data source
+Tested inventory functionality using various Ansible commands and validation techniques
+Organized infrastructure using groups, host variables, and group variables
+Troubleshot common issues and implemented performance optimizations
+Why This Matters:
+
+Scalability: Dynamic inventories automatically adapt to infrastructure changes, reducing manual maintenance
+Organization: Proper inventory structure makes automation more manageable and maintainable
+Flexibility: Multiple inventory sources can be combined to support complex environments
+Efficiency: Well-structured inventories improve playbook performance and reduce errors
+Enterprise Readiness: These skills are essential for managing large-scale automation in enterprise environments
+Key Takeaways:
+
+Static inventories provide precise control and are ideal for stable environments
+Dynamic inventories excel in cloud and auto-scaling environments
+Variable precedence and organization are crucial for maintainable automation
+Testing and validation should be integral parts of inventory management
+Performance considerations become important as inventory size grows
+You now have the foundational skills to design and implement inventory strategies that scale from small environments to enterprise-level infrastructure automation using Red Hat Ansible Automation Platform principles.
