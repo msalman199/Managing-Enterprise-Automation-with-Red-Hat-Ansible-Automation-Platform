@@ -1,0 +1,409 @@
+Lab 6: Creating and Launching Ansible Jobs
+Objectives
+By the end of this lab, you will be able to:
+
+Create job templates in Ansible AWX/Tower for automated playbook execution
+Configure job template parameters including inventory, credentials, and playbooks
+Launch automation jobs manually through the web interface
+Monitor job execution status and progress in real-time
+View and analyze job output logs for troubleshooting and verification
+Understand job template best practices for enterprise automation
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Ansible playbooks and YAML syntax
+Familiarity with Linux command line operations
+Knowledge of SSH key authentication
+Completion of previous Ansible labs (inventory management, playbook creation)
+Understanding of basic networking concepts
+Required Knowledge Areas
+Ansible Fundamentals: Variables, tasks, handlers, and playbook structure
+Linux Administration: File permissions, service management, package installation
+YAML Syntax: Proper indentation and data structure formatting
+SSH Concepts: Key-based authentication and connection troubleshooting
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines with Ansible AWX already installed and configured. Simply click Start Lab to access your environment - no need to build your own VM or install software.
+
+Environment Details
+Control Node: CentOS 8 with Ansible AWX/Tower installed
+Managed Nodes: 2 CentOS 8 servers for testing automation
+Network: All nodes configured with SSH key authentication
+Web Access: AWX web interface accessible via browser
+Task 1: Create a Job Template with a Specific Playbook
+Subtask 1.1: Access AWX Web Interface
+Open your web browser and navigate to the AWX interface:
+
+http://your-awx-server-ip
+Log in using the provided credentials:
+
+Username: admin
+Password: password123
+Verify successful login by confirming you can see the AWX dashboard with navigation menu on the left side.
+
+Subtask 1.2: Create a Sample Playbook
+Connect to the AWX server via SSH:
+
+ssh awx-user@your-awx-server-ip
+Create a project directory for your playbooks:
+
+sudo mkdir -p /var/lib/awx/projects/lab6-project
+sudo chown awx:awx /var/lib/awx/projects/lab6-project
+Create a comprehensive playbook for system configuration: ```bash sudo tee /var/lib/awx/projects/lab6-project/system-setup.yml > /dev/null << 'EOF'
+name: System Configuration and Package Management hosts: all become: yes vars: packages_to_install: - htop - vim - curl - wget service_user: "webadmin"
+
+tasks:
+
+name: Update package cache yum: update_cache: yes tags: packages
+
+name: Install required packages yum: name: "{{ packages_to_install }}" state: present tags: packages
+
+name: Create service user user: name: "{{ service_user }}" shell: /bin/bash create_home: yes state: present tags: users
+
+name: Create application directory file: path: /opt/myapp state: directory owner: "{{ service_user }}" group: "{{ service_user }}" mode: '0755' tags: directories
+
+name: Copy configuration template copy: content: | # Application Configuration APP_NAME=MyApplication APP_VERSION=1.0 DEBUG=false LOG_LEVEL=info dest: /opt/myapp/config.env owner: "{{ service_user }}" group: "{{ service_user }}" mode: '0644' tags: config
+
+name: Ensure firewalld is running systemd: name: firewalld state: started enabled: yes tags: services
+
+handlers:
+
+name: restart firewalld systemd: name: firewalld state: restarted
+EOF
+
+
+Set proper permissions on the playbook:
+
+sudo chown awx:awx /var/lib/awx/projects/lab6-project/system-setup.yml
+sudo chmod 644 /var/lib/awx/projects/lab6-project/system-setup.yml
+Subtask 1.3: Create Project in AWX
+Navigate to Projects in the AWX web interface:
+
+Click Projects in the left navigation menu
+Click the + (Add) button
+Configure the project with the following settings:
+
+Name: Lab6 System Configuration
+Description: Playbooks for system configuration and package management
+Organization: Default
+SCM Type: Manual
+Playbook Directory: lab6-project
+Save the project by clicking the Save button
+
+Verify project creation by confirming it appears in the projects list
+
+Subtask 1.4: Create Job Template
+Navigate to Templates in the AWX interface:
+
+Click Templates in the left navigation menu
+Click the + (Add) button
+Select Job Template
+Configure the job template with these parameters:
+
+Basic Information:
+
+Name: System Configuration Job
+Description: Automated system setup and package installation
+Job Type: Run
+Inventory: Demo Inventory (or your configured inventory)
+Project: Lab6 System Configuration
+Playbook: system-setup.yml
+Credentials:
+
+Credentials: Select your SSH credential (Demo Credential)
+Advanced Options:
+
+Verbosity: 1 (Verbose)
+Job Tags: Leave empty for now
+Skip Tags: Leave empty
+Limit: Leave empty to run on all hosts
+Configure additional settings:
+
+Check Enable Privilege Escalation (since playbook uses become: yes)
+Check Allow Simultaneous if you want multiple jobs to run concurrently
+Uncheck Enable Fact Storage for this lab
+Save the job template by clicking Save
+
+Subtask 1.5: Verify Job Template Configuration
+Review the created template:
+
+Confirm all fields are populated correctly
+Verify the playbook is properly associated
+Check that credentials are properly linked
+Test template validation:
+
+Look for any warning icons or error messages
+Ensure the Launch button is available and enabled
+Task 2: Launch Jobs Manually
+Subtask 2.1: Launch Your First Job
+Navigate to the job template:
+
+Go to Templates in the left menu
+Find your System Configuration Job template
+Click the rocket (Launch) icon
+Review launch parameters (if prompted):
+
+Inventory: Confirm correct inventory is selected
+Credentials: Verify SSH credentials are present
+Variables: Leave empty for this initial run
+Click Launch to start the job
+Observe job initiation:
+
+Note the job ID assigned
+Watch as the job status changes from "Pending" to "Running"
+Subtask 2.2: Launch Job with Custom Variables
+Launch the template again with custom variables:
+
+Click the Launch button on your template
+In the launch dialog, expand Variables section
+Add custom variables in YAML format: ```yaml
+packages_to_install:
+
+htop
+vim
+curl
+wget
+git
+tree service_user: "customuser"
+
+Launch the customized job:
+
+Review the variables you entered
+Click Launch to start execution
+Subtask 2.3: Launch Job with Tags
+Create a new job launch with specific tags:
+
+Click Launch on your template
+In the Job Tags field, enter: packages,users
+This will only run tasks tagged with "packages" or "users"
+Launch the tagged job:
+
+Click Launch to execute only the specified tasks
+Note how this affects execution time and scope
+Subtask 2.4: Launch Job with Host Limiting
+Launch with host limitation:
+
+Click Launch on your template
+In the Limit field, enter a specific hostname or pattern
+Example: web* or specific hostname from your inventory
+Execute the limited job:
+
+Click Launch
+Observe how the job runs only on specified hosts
+Task 3: Monitor Job Status and View Output Logs
+Subtask 3.1: Real-Time Job Monitoring
+Access the Jobs dashboard:
+
+Click Jobs in the left navigation menu
+You should see all your launched jobs listed
+Monitor active job execution:
+
+Click on a Running job to view details
+Observe the real-time output in the Output section
+Watch task progression and status updates
+Understand job status indicators:
+
+Pending: Job queued but not yet started
+Running: Job currently executing
+Successful: Job completed without errors
+Failed: Job encountered errors
+Canceled: Job was manually stopped
+Subtask 3.2: Detailed Job Output Analysis
+View comprehensive job logs:
+
+Click on a completed job from the jobs list
+Review the Details tab for job metadata:
+Start and end times
+Duration
+User who launched the job
+Template used
+Analyze the Output tab:
+
+Scroll through the complete execution log
+Identify different phases of execution:
+PLAY [System Configuration and Package Management]
+
+TASK [Gathering Facts]
+ok: [hostname]
+
+TASK [Update package cache]
+changed: [hostname]
+
+TASK [Install required packages]
+changed: [hostname] => (item=htop)
+changed: [hostname] => (item=vim)
+Understand output formatting:
+
+Green "ok": Task completed successfully, no changes made
+Yellow "changed": Task completed successfully, changes were made
+Red "failed": Task encountered an error
+Purple "skipped": Task was skipped due to conditions
+Subtask 3.3: Job Statistics and Reporting
+Review job statistics:
+
+In the job details, find the Statistics section
+Note metrics such as:
+Total hosts
+Successful hosts
+Failed hosts
+Changed hosts
+Unreachable hosts
+Examine host-specific results:
+
+Click on individual hosts in the statistics
+Review per-host execution details
+Identify any host-specific issues or variations
+Subtask 3.4: Advanced Log Analysis
+Search and filter logs:
+
+Use the search functionality in the output view
+Search for specific terms like "TASK", "ERROR", or "changed"
+Filter by different log levels if available
+Download job logs:
+
+Look for download options in the job interface
+Save logs for offline analysis or reporting
+Note the log format and structure
+Compare job executions:
+
+Run the same template multiple times
+Compare outputs between runs
+Identify differences in execution (especially "changed" vs "ok" status)
+Subtask 3.5: Troubleshooting Failed Jobs
+Intentionally create a failing job for learning:
+
+Edit your playbook to include a task that will fail:
+sudo tee -a /var/lib/awx/projects/lab6-project/system-setup.yml > /dev/null << 'EOF'
+
+    - name: This task will fail intentionally
+      command: /bin/false
+      tags: test_failure
+EOF
+Launch job with the failing task:
+
+Launch your template with job tags: test_failure
+Watch the job fail and examine the error output
+Analyze failure logs:
+
+Review the error message in the output
+Identify the specific task that caused the failure
+Note how Ansible stops execution after the failure
+Fix the issue and rerun:
+
+Remove or comment out the failing task
+Relaunch the job to confirm it succeeds
+Advanced Job Management
+Creating Job Templates with Surveys
+Add a survey to your job template:
+
+Edit your System Configuration Job template
+Click the Survey tab
+Click Add to create survey questions
+Configure survey questions:
+
+Question: Which packages should be installed?
+Answer Variable Name: packages_to_install
+Answer Type: Multiple Choice (multiple select)
+Multiple Choice Options:
+- htop
+- vim
+- curl
+- wget
+- git
+- tree
+- nano
+Test the survey:
+
+Save the template
+Launch the job and fill out the survey
+Observe how survey answers become job variables
+Scheduling Jobs
+Create a scheduled job:
+
+Go to Templates and find your job template
+Click the Schedules tab
+Click Add to create a new schedule
+Configure the schedule:
+
+Name: Daily System Check
+Start Date/Time: Set to tomorrow at 2:00 AM
+Repeat Frequency: Daily
+End: Never (or set an end date)
+Save and verify the schedule appears in the schedules list
+
+Troubleshooting Common Issues
+Issue 1: Job Template Won't Launch
+Symptoms: Launch button is grayed out or missing
+
+Solutions:
+
+Verify inventory is properly configured and has hosts
+Check that credentials are properly associated
+Ensure the playbook exists in the specified project
+Confirm you have proper permissions to launch jobs
+Issue 2: Jobs Fail with Permission Errors
+Symptoms: Tasks fail with "Permission denied" errors
+
+Solutions:
+
+Verify SSH credentials are correct and have proper access
+Check that "Enable Privilege Escalation" is checked if using become
+Ensure the SSH user has sudo privileges on target hosts
+Test SSH connectivity manually from the AWX server
+Issue 3: Playbook Not Found
+Symptoms: "Playbook not found" error when launching
+
+Solutions:
+
+Verify the playbook file exists in the correct project directory
+Check file permissions (should be readable by awx user)
+Ensure the project is properly synced
+Verify the playbook path in the job template
+Issue 4: Slow Job Execution
+Symptoms: Jobs take longer than expected to complete
+
+Solutions:
+
+Check network connectivity between AWX and managed hosts
+Verify SSH connection settings and authentication
+Review playbook efficiency and task complexity
+Consider using connection multiplexing for better performance
+Best Practices for Job Templates
+Template Organization
+Use descriptive names that clearly indicate the template's purpose
+Include comprehensive descriptions explaining what the template does
+Organize templates by function (system maintenance, application deployment, etc.)
+Use consistent naming conventions across your organization
+Security Considerations
+Limit template access using AWX role-based access control
+Use separate credentials for different environments (dev, staging, prod)
+Avoid hardcoding sensitive data in playbooks; use AWX credentials instead
+Regularly audit who has access to launch which templates
+Performance Optimization
+Use job tags to run only necessary tasks
+Implement proper error handling in playbooks
+Use fact caching for frequently run jobs
+Consider job slicing for large inventories
+Conclusion
+In this lab, you have successfully accomplished several critical automation tasks:
+
+Key Achievements:
+
+Job Template Creation: You learned how to create comprehensive job templates that serve as reusable automation blueprints, including proper configuration of inventories, credentials, and playbooks.
+
+Manual Job Execution: You gained hands-on experience launching jobs through the AWX web interface, including customization with variables, tags, and host limitations.
+
+Job Monitoring and Analysis: You developed skills in real-time job monitoring, log analysis, and troubleshooting, which are essential for maintaining reliable automation workflows.
+
+Why This Matters:
+
+Enterprise Automation: Job templates are the foundation of enterprise automation, allowing teams to standardize and scale their infrastructure management
+Operational Efficiency: Manual job launching provides the flexibility to respond to immediate needs while maintaining automation benefits
+Troubleshooting Skills: Understanding job logs and monitoring is crucial for maintaining reliable automation in production environments
+Career Advancement: These skills directly align with Red Hat Ansible Automation Platform certification requirements and real-world enterprise automation roles
+Next Steps:
+
+Explore advanced job template features like workflows and approval processes
+Practice creating templates for different use cases (application deployment, security compliance, etc.)
+Learn about job template surveys for user-friendly parameter collection
+Investigate integration with external systems through AWX APIs
+You now have the foundational skills to create, launch, and monitor Ansible automation jobs effectively, positioning you well for advanced automation scenarios and professional certification success.
