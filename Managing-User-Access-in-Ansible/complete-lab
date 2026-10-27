@@ -1,0 +1,407 @@
+Lab 2: Managing User Access in Ansible Automation Platform
+Objectives
+By the end of this lab, students will be able to:
+
+Create and manage user accounts through the Ansible Automation Platform web interface
+Organize users into teams for better access management
+Assign different roles and permissions to users and teams
+Understand the role-based access control (RBAC) model in Ansible Automation Platform
+Configure appropriate access levels for different organizational roles
+Implement security best practices for user management
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with web browser navigation
+Basic knowledge of organizational roles and permissions concepts
+Completion of Lab 1 or equivalent experience with Ansible Automation Platform basics
+Understanding of user management concepts in enterprise environments
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines with Ansible Automation Platform already installed and running. Simply click Start Lab to access your environment - no need to build your own VM or install software.
+
+Your lab environment includes:
+
+Red Hat Enterprise Linux 9 server
+Ansible Automation Platform (AWX/Controller) pre-installed
+Web interface accessible via browser
+Sample data and configurations ready for use
+Task 1: Create User Accounts Through the Web Interface
+Subtask 1.1: Access the Ansible Automation Platform Web Interface
+Open your web browser and navigate to the Ansible Automation Platform URL provided in your lab environment
+
+Log in using the administrator credentials:
+
+Username: admin
+Password: admin123 (or as provided in your lab environment)
+Once logged in, you should see the main dashboard with various menu options on the left sidebar
+
+Subtask 1.2: Navigate to User Management
+In the left sidebar, click on Access
+Select Users from the dropdown menu
+You will see the current list of users (initially just the admin user)
+Subtask 1.3: Create Individual User Accounts
+Let's create several user accounts representing different roles in an organization:
+
+Create a Developer User
+Click the Add button (+ icon) in the top right corner of the Users page
+Fill in the user details:
+Username: developer1
+Email: developer1@company.com
+First Name: John
+Last Name: Developer
+Password: DevPass123!
+Confirm Password: DevPass123!
+Leave User Type as Normal User
+Click Save
+Create an Operations User
+Click the Add button again
+Fill in the user details:
+Username: ops1
+Email: ops1@company.com
+First Name: Sarah
+Last Name: Operations
+Password: OpsPass123!
+Confirm Password: OpsPass123!
+Leave User Type as Normal User
+Click Save
+Create a Manager User
+Click the Add button again
+Fill in the user details:
+Username: manager1
+Email: manager1@company.com
+First Name: Mike
+Last Name: Manager
+Password: MgrPass123!
+Confirm Password: MgrPass123!
+Leave User Type as Normal User
+Click Save
+Create an Auditor User
+Click the Add button again
+Fill in the user details:
+Username: auditor1
+Email: auditor1@company.com
+First Name: Lisa
+Last Name: Auditor
+Password: AudPass123!
+Confirm Password: AudPass123!
+Leave User Type as Normal User
+Click Save
+Subtask 1.4: Verify User Creation
+Return to the Users list by clicking Users in the left sidebar under Access
+Verify that all four new users appear in the list:
+developer1
+ops1
+manager1
+auditor1
+Note that each user shows as Normal User type and Active status
+Task 2: Organize Users into Teams
+Subtask 2.1: Navigate to Team Management
+In the left sidebar under Access, click on Teams
+You will see the current list of teams (initially empty or with default teams)
+Subtask 2.2: Create Development Team
+Click the Add button (+ icon)
+Fill in the team details:
+Name: Development Team
+Description: Team responsible for application development and testing
+Organization: Select Default (or your organization name)
+Click Save
+Subtask 2.3: Create Operations Team
+Click the Add button again
+Fill in the team details:
+Name: Operations Team
+Description: Team responsible for infrastructure and deployment operations
+Organization: Select Default
+Click Save
+Subtask 2.4: Create Management Team
+Click the Add button again
+Fill in the team details:
+Name: Management Team
+Description: Team with oversight and management responsibilities
+Organization: Select Default
+Click Save
+Subtask 2.5: Create Audit Team
+Click the Add button again
+Fill in the team details:
+Name: Audit Team
+Description: Team responsible for compliance and security auditing
+Organization: Select Default
+Click Save
+Subtask 2.6: Add Users to Teams
+Add Developer to Development Team
+Click on Development Team from the teams list
+Click on the Users tab
+Click the Add button
+Select developer1 from the list
+Click Save
+Add Operations User to Operations Team
+Navigate back to Teams and click on Operations Team
+Click on the Users tab
+Click the Add button
+Select ops1 from the list
+Click Save
+Add Manager to Management Team
+Navigate back to Teams and click on Management Team
+Click on the Users tab
+Click the Add button
+Select manager1 from the list
+Click Save
+Add Auditor to Audit Team
+Navigate back to Teams and click on Audit Team
+Click on the Users tab
+Click the Add button
+Select auditor1 from the list
+Click Save
+Task 3: Assign Different Roles and Permissions
+Subtask 3.1: Understanding Ansible Automation Platform Roles
+Before assigning roles, let's understand the key built-in roles:
+
+System Administrator: Full system access
+System Auditor: Read-only access to all resources
+Organization Admin: Full access within an organization
+Project Admin: Manage projects and related resources
+Inventory Admin: Manage inventories and hosts
+Job Template Admin: Manage job templates and workflows
+Execute: Can run job templates
+Read: Read-only access to specific resources
+Subtask 3.2: Assign Organization-Level Roles
+Grant Management Team Organization Admin Role
+Navigate to Access > Users
+Click on manager1
+Click on the Roles tab
+Click the Add button
+Select Organizations from the resource type
+Select Default organization
+Select Admin role
+Click Save
+Grant Audit Team System Auditor Role
+Navigate to Access > Users
+Click on auditor1
+Click on the Roles tab
+Click the Add button
+Select Organizations from the resource type
+Select Default organization
+Select Auditor role
+Click Save
+Subtask 3.3: Create and Configure Project for Role Assignment
+First, let's create a sample project to demonstrate project-level permissions:
+
+Navigate to Resources > Projects
+Click the Add button
+Fill in the project details:
+Name: Sample Web App Project
+Description: Sample project for demonstrating role-based access
+Organization: Default
+Source Control Type: Git
+Source Control URL: https://github.com/ansible/ansible-examples.git
+Click Save
+Subtask 3.4: Assign Project-Level Roles
+Grant Development Team Project Admin Role
+Navigate to Resources > Projects
+Click on Sample Web App Project
+Click on the Access tab
+Click the Add button
+Select Teams as the user/team type
+Select Development Team
+Select Admin role
+Click Save
+Grant Operations Team Execute Role on Project
+While still in the Sample Web App Project access tab
+Click the Add button again
+Select Teams as the user/team type
+Select Operations Team
+Select Use role
+Click Save
+Subtask 3.5: Create Inventory for Role Demonstration
+Navigate to Resources > Inventories
+Click the Add button and select Add inventory
+Fill in the inventory details:
+Name: Production Servers
+Description: Production server inventory for role demonstration
+Organization: Default
+Click Save
+Subtask 3.6: Assign Inventory-Level Roles
+Grant Operations Team Inventory Admin Role
+Click on Production Servers inventory
+Click on the Access tab
+Click the Add button
+Select Teams as the user/team type
+Select Operations Team
+Select Admin role
+Click Save
+Grant Development Team Read Role on Inventory
+While still in the Production Servers inventory access tab
+Click the Add button
+Select Teams as the user/team type
+Select Development Team
+Select Read role
+Click Save
+Subtask 3.7: Create Job Template for Role Demonstration
+Navigate to Resources > Templates
+Click the Add button and select Add job template
+Fill in the template details:
+Name: Deploy Web Application
+Description: Deploy web application to production servers
+Job Type: Run
+Inventory: Production Servers
+Project: Sample Web App Project
+Playbook: lamp_simple/site.yml
+Click Save
+Subtask 3.8: Assign Job Template Roles
+Grant Operations Team Execute Role
+Click on Deploy Web Application job template
+Click on the Access tab
+Click the Add button
+Select Teams as the user/team type
+Select Operations Team
+Select Execute role
+Click Save
+Grant Management Team Admin Role
+While still in the Deploy Web Application job template access tab
+Click the Add button
+Select Teams as the user/team type
+Select Management Team
+Select Admin role
+Click Save
+Task 4: Test User Access and Permissions
+Subtask 4.1: Test Developer User Access
+Open a new browser tab or incognito window
+Navigate to the Ansible Automation Platform URL
+Log in as developer1 with password DevPass123!
+Observe the available menu options and resources
+Try to access the Sample Web App Project - you should have admin access
+Try to access Production Servers inventory - you should have read-only access
+Try to access the Deploy Web Application job template - you should see it but not be able to execute it
+Subtask 4.2: Test Operations User Access
+Open another browser tab or incognito window
+Log in as ops1 with password OpsPass123!
+Observe the available menu options and resources
+Try to access the Production Servers inventory - you should have admin access
+Try to access the Deploy Web Application job template - you should be able to execute it
+Try to modify the Sample Web App Project - you should have limited access
+Subtask 4.3: Test Manager User Access
+Open another browser tab or incognito window
+Log in as manager1 with password MgrPass123!
+Observe that you have broader access due to Organization Admin role
+Try to access all resources - you should have administrative access to most items
+Try to create new users or teams - you should be able to do this
+Subtask 4.4: Test Auditor User Access
+Open another browser tab or incognito window
+Log in as auditor1 with password AudPass123!
+Observe that you can view all resources but cannot modify them
+Try to edit any resource - you should receive permission denied messages
+Verify you can view job history and logs for auditing purposes
+Task 5: Advanced Permission Configuration
+Subtask 5.1: Create Custom Team with Mixed Permissions
+Log back in as the admin user
+Navigate to Access > Teams
+Create a new team:
+Name: DevOps Team
+Description: Cross-functional team with development and operations responsibilities
+Add both developer1 and ops1 to this team
+Subtask 5.2: Configure Workflow-Based Permissions
+Navigate to Resources > Templates
+Click Add and select Add workflow template
+Create a workflow template:
+Name: Complete Deployment Workflow
+Description: End-to-end deployment workflow
+Organization: Default
+Grant the DevOps Team execute permissions on this workflow
+Subtask 5.3: Implement Time-Based Access (Conceptual)
+While Ansible Automation Platform doesn't have built-in time-based access, document how you would implement this using external systems:
+
+Create a procedure document for temporary access elevation
+Define the process for emergency access during incidents
+Establish audit trails for elevated access usage
+Troubleshooting Common Issues
+Issue 1: User Cannot See Expected Resources
+Problem: User logs in but cannot see projects, inventories, or job templates they should have access to.
+
+Solution:
+
+Verify the user is assigned to the correct team
+Check that the team has the appropriate role on the resource
+Ensure the resource belongs to the same organization as the user
+Refresh the browser or clear cache
+Issue 2: Permission Denied When Executing Job Templates
+Problem: User can see job template but gets permission denied when trying to execute.
+
+Solution:
+
+Verify the user/team has Execute role on the job template
+Check that the user has Use role on the associated project
+Ensure the user has appropriate access to the inventory
+Verify all credential requirements are met
+Issue 3: Team Members Not Inheriting Team Permissions
+Problem: Users added to teams don't automatically get team permissions.
+
+Solution:
+
+Confirm the user is properly added to the team
+Verify team permissions are correctly configured
+Check organization membership alignment
+Have the user log out and log back in
+Issue 4: Unable to Assign Roles
+Problem: Cannot assign roles to users or teams.
+
+Solution:
+
+Ensure you have admin privileges on the resource
+Verify the target user/team exists and is active
+Check organization boundaries - users can only be granted roles within their organization
+Confirm the role type is appropriate for the resource
+Verification and Testing Commands
+To verify your configuration from the command line (if needed), you can use these AWX CLI commands:
+
+# Install AWX CLI (if not already installed)
+pip3 install awxkit
+
+# Configure AWX CLI
+export CONTROLLER_HOST=https://your-awx-host
+export CONTROLLER_USERNAME=admin
+export CONTROLLER_PASSWORD=admin123
+
+# List all users
+awx users list
+
+# List all teams
+awx teams list
+
+# Show user roles
+awx users get <user_id> --related roles
+
+# Show team roles
+awx teams get <team_id> --related roles
+Security Best Practices Implemented
+Throughout this lab, we've implemented several security best practices:
+
+Principle of Least Privilege: Users are granted only the minimum permissions needed for their role
+Role-Based Access Control: Permissions are assigned based on job functions rather than individuals
+Separation of Duties: Different teams have different responsibilities and access levels
+Audit Trail: All actions are logged and auditable through the auditor role
+Team-Based Management: Permissions are managed through teams for easier administration
+Conclusion
+In this comprehensive lab, you have successfully:
+
+Created multiple user accounts representing different organizational roles through the Ansible Automation Platform web interface
+Organized users into functional teams that reflect real-world organizational structures
+Implemented role-based access control by assigning appropriate permissions to users and teams
+Configured multi-level permissions across projects, inventories, and job templates
+Tested access controls to ensure proper security boundaries
+Applied security best practices for enterprise automation environments
+Why This Matters
+User access management is critical in enterprise automation because:
+
+Security: Proper access controls prevent unauthorized changes to critical infrastructure
+Compliance: Many industries require strict access controls and audit trails
+Efficiency: Team-based permissions reduce administrative overhead
+Accountability: Clear role assignments make it easy to track who did what
+Scalability: Well-designed access controls grow with your organization
+Next Steps
+After completing this lab, you should be able to:
+
+Design access control strategies for your organization
+Implement complex permission hierarchies
+Troubleshoot access-related issues
+Maintain security while enabling team productivity
+Prepare for advanced Ansible Automation Platform administration tasks
+This foundation in user access management will be essential as you progress to more advanced topics like workflow automation, credential management, and enterprise integration in subsequent labs.
