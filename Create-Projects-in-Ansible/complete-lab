@@ -1,0 +1,289 @@
+Lab 5: Create Projects in Ansible
+Objectives
+By the end of this lab, you will be able to:
+
+• Understand the concept of Ansible projects and their role in automation workflows • Create and configure a new project in Ansible Automation Controller • Link an Ansible project to a Git repository for version control • Synchronize project content from a remote Git repository • Verify project creation and synchronization status • Troubleshoot common project creation and synchronization issues
+
+Prerequisites
+Before starting this lab, you should have:
+
+• Basic understanding of Ansible concepts (playbooks, inventories, roles) • Familiarity with Git version control system • Knowledge of YAML syntax • Understanding of Linux command line operations • Access to Ansible Automation Controller (AWX or Red Hat Ansible Automation Platform) • Basic networking concepts
+
+Required Knowledge Level: Intermediate to Advanced Ansible experience
+
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines with Ansible Automation Controller already installed. Simply click Start Lab to access your environment - no need to build your own VM or install software.
+
+Your lab environment includes: • CentOS/RHEL 8+ with Ansible Automation Controller • Git client pre-installed • Network connectivity to external repositories • Web browser access to Automation Controller interface
+
+Task 1: Create a Project in Automation Controller
+Subtask 1.1: Access the Automation Controller Interface
+Open your web browser and navigate to the Automation Controller URL provided in your lab environment
+
+Log in using the credentials provided:
+
+Username: admin
+Password: [provided in lab environment]
+Verify successful login by confirming you can see the main dashboard with navigation menu on the left side
+
+Subtask 1.2: Navigate to Projects Section
+Click on Projects in the left navigation menu
+
+Observe the current projects list - you may see some default or example projects already present
+
+Click the Add button (+ icon) to create a new project
+
+Subtask 1.3: Configure Basic Project Settings
+Fill in the Project Details:
+
+Name: MyFirstProject
+Description: Lab project for learning Ansible automation
+Organization: Default (or select your organization)
+Select Source Control Type:
+
+Choose Git from the SCM Type dropdown menu
+Configure Execution Environment (if available):
+
+Leave as Default execution environment or select an appropriate one
+Subtask 1.4: Save Initial Project Configuration
+Click Save to create the basic project structure
+
+Verify project creation by checking that "MyFirstProject" appears in the projects list
+
+Note the project status - it should show as "Never updated" since we haven't linked it to a repository yet
+
+Task 2: Link the Project to a Git Repository
+Subtask 2.1: Prepare a Sample Git Repository
+For this lab, we'll use a public repository with sample Ansible content. If you want to create your own repository, follow these steps:
+
+Create a simple directory structure on your local system or use the provided sample repository:
+mkdir ansible-lab-project
+cd ansible-lab-project
+
+# Create a simple playbook
+cat > site.yml << 'EOF'
+---
+- name: Simple web server setup
+  hosts: web
+  become: yes
+  tasks:
+    - name: Install Apache
+      package:
+        name: httpd
+        state: present
+    
+    - name: Start Apache service
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+EOF
+
+# Create an inventory file
+cat > inventory << 'EOF'
+[web]
+webserver1 ansible_host=192.168.1.10
+webserver2 ansible_host=192.168.1.11
+EOF
+
+# Create a simple role structure
+mkdir -p roles/webserver/tasks
+cat > roles/webserver/tasks/main.yml << 'EOF'
+---
+- name: Install web server packages
+  package:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - httpd
+    - mod_ssl
+EOF
+Subtask 2.2: Use a Public Sample Repository
+For this lab, we'll use a pre-existing public repository:
+
+Repository URL: https://github.com/ansible/ansible-examples.git
+
+This repository contains various Ansible examples and is perfect for learning purposes.
+
+Subtask 2.3: Configure Git Repository Connection
+Edit the project by clicking on "MyFirstProject" in the projects list
+
+Configure the SCM URL:
+
+SCM URL: https://github.com/ansible/ansible-examples.git
+Set SCM Branch/Tag/Commit (optional):
+
+SCM Branch/Tag/Commit: master
+Leave blank to use the default branch
+
+Configure SCM Credential (if needed):
+
+For public repositories, leave this blank
+For private repositories, you would select appropriate credentials
+Subtask 2.4: Configure Advanced SCM Options
+SCM Update Options - Check the following boxes:
+
+Clean: Remove any local modifications before updating
+Delete on Update: Delete the local repository and re-clone on update
+Update Revision on Launch: Update the repository before running jobs
+Cache Timeout (seconds):
+
+Cache Timeout: 0
+Setting to 0 means always update when launching jobs
+
+Subtask 2.5: Save Repository Configuration
+Click Save to apply the Git repository configuration
+
+Verify the configuration by checking that the SCM URL is now displayed in the project details
+
+Task 3: Sync the Project with the Repository
+Subtask 3.1: Initiate Manual Synchronization
+Locate the sync button - Look for the sync icon (circular arrow) next to your project in the projects list
+
+Click the sync button to start the synchronization process
+
+Monitor the sync status - The status should change to "Running" and show a progress indicator
+
+Subtask 3.2: Verify Synchronization Progress
+Watch the status updates in real-time:
+
+Pending: Sync job is queued
+Running: Sync is in progress
+Successful: Sync completed successfully
+Failed: Sync encountered errors
+Click on the project name to view detailed sync information
+
+Check the Last Job Status section for detailed logs
+
+Subtask 3.3: Review Synchronization Results
+Examine the sync job output by clicking on the job ID in the "Last Job Status" section
+
+Review the job details:
+
+Job Type: SCM Update
+Status: Successful
+Started: [timestamp]
+Finished: [timestamp]
+Check the job output for Git clone/pull operations:
+
+identity added: /tmp/awx_xyz/credential (/tmp/awx_xyz/credential)
+Cloning into '/var/lib/awx/projects/_xyz__myproject'...
+remote: Enumerating objects: 150, done.
+remote: Counting objects: 100% (150/150), done.
+remote: Compressing objects: 100% (95/95), done.
+remote: Total 150 (delta 45), reused 130 (delta 35), pack-reused 0
+Receiving objects: 100% (150/150), 25.67 KiB | 8.56 MiB/s, done.
+Resolving deltas: 100% (45/45), done.
+Subtask 3.4: Explore Synchronized Content
+Navigate back to the project details page
+
+Check the "Revision" field - it should now show the latest commit hash from the repository
+
+Verify the "Last Updated" timestamp reflects the recent synchronization
+
+Look for available playbooks - The system should now detect playbooks from the repository
+
+Verification and Testing
+Verify Project Creation Success
+Confirm project appears in projects list with status "Successful"
+
+Check project details show:
+
+Correct SCM URL
+Recent sync timestamp
+Valid revision hash
+Available playbooks detected
+Verify no error messages in the sync job logs
+
+Test Project Functionality
+Create a simple job template using your project:
+
+Go to Templates → Add → Job Template
+Select your project from the dropdown
+Choose an available playbook
+Save the template
+Verify playbook detection:
+
+The playbook dropdown should populate with files from your repository
+Common files like site.yml, playbook.yml should be visible
+Troubleshooting Common Issues
+Issue 1: Sync Fails with Authentication Error
+Problem: Git repository requires authentication but no credentials provided
+
+Solution:
+
+# Create credential in Automation Controller
+1. Go to Credentials → Add
+2. Select "Source Control" credential type
+3. Provide username/password or SSH key
+4. Link credential to project
+Issue 2: Sync Fails with Network Connectivity
+Problem: Cannot reach Git repository URL
+
+Solution:
+
+# Test connectivity from controller host
+curl -I https://github.com/ansible/ansible-examples.git
+# Check firewall and proxy settings
+Issue 3: No Playbooks Detected After Sync
+Problem: Project syncs successfully but no playbooks appear
+
+Solution:
+
+Verify repository contains .yml or .yaml files in root directory
+Check that files follow Ansible playbook format
+Ensure files are not in subdirectories (unless specified)
+Issue 4: Sync Hangs or Times Out
+Problem: Synchronization process doesn't complete
+
+Solution:
+
+# Check repository size and network speed
+# Consider using shallow clone for large repositories
+# Verify no proxy or firewall blocking
+Advanced Configuration Options
+Setting Up Automatic Synchronization
+Configure webhook triggers for automatic sync on Git push:
+
+Webhook Service: GitHub/GitLab
+Webhook URL: [provided by Automation Controller]
+Set up periodic sync using schedules:
+
+Create schedule for regular project updates
+Configure frequency based on change rate
+Using Private Repositories
+SSH Key Authentication:
+
+# Generate SSH key pair
+ssh-keygen -t rsa -b 4096 -C "ansible-controller@company.com"
+
+# Add public key to Git repository
+# Add private key to Automation Controller credentials
+Token-based Authentication:
+
+Username: git
+Password: [personal access token]
+Best Practices
+Project Organization
+• Use descriptive project names that reflect their purpose • Organize repositories with clear directory structures • Include README files with project documentation • Use version tags for stable releases
+
+Security Considerations
+• Use private repositories for sensitive automation content • Implement proper access controls on Git repositories • Regularly rotate credentials used for repository access • Audit project access and synchronization logs
+
+Performance Optimization
+• Use shallow clones for large repositories • Configure appropriate cache timeouts based on change frequency • Monitor sync job performance and optimize as needed • Clean up old project revisions periodically
+
+Conclusion
+In this lab, you have successfully accomplished the following key tasks:
+
+What You Learned: • Created a new Ansible project in Automation Controller from scratch • Configured Git repository integration for version-controlled automation content • Performed manual synchronization to pull the latest content from a remote repository • Verified project functionality and troubleshot common synchronization issues
+
+Why This Matters: Projects in Ansible Automation Controller serve as the foundation for organizing and managing your automation content. By linking projects to Git repositories, you enable:
+
+• Version Control: Track changes and maintain history of your automation code • Collaboration: Multiple team members can contribute to the same automation projects • Consistency: Ensure all automation jobs use the same, tested playbooks and roles • Scalability: Easily distribute automation content across multiple environments
+
+Real-World Applications: The skills you've developed in this lab are essential for: • Managing enterprise automation workflows • Implementing Infrastructure as Code practices • Maintaining compliance and audit trails for automation changes • Enabling DevOps practices in your organization
+
+Next Steps: With your project successfully created and synchronized, you can now: • Create job templates that use playbooks from your project • Set up inventories to define target systems for automation • Configure credentials for accessing managed systems • Build comprehensive automation workflows
+
+This foundational knowledge of project management in Ansible Automation Controller prepares you for more advanced automation scenarios and is crucial for the Red Hat Ansible Automation Platform certification path.
