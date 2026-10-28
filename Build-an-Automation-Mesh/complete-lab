@@ -1,0 +1,505 @@
+Lab 14: Build an Automation Mesh
+Objectives
+By the end of this lab, you will be able to:
+
+• Understand the concept and benefits of Ansible Automation Mesh • Set up and configure an Automation Mesh across multiple instances • Add Automation Controllers to the mesh topology • Configure execution nodes and hop nodes for distributed automation • Test job execution across the mesh infrastructure • Monitor and troubleshoot mesh connectivity • Implement best practices for mesh security and performance
+
+Prerequisites
+Before starting this lab, you should have:
+
+• Basic understanding of Ansible concepts and playbooks • Familiarity with Linux command line operations • Knowledge of SSH key management and network connectivity • Understanding of containerization concepts (Podman/Docker) • Experience with YAML configuration files • Basic networking knowledge (ports, firewalls, DNS)
+
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own VMs or install software.
+
+Your lab environment includes: • 4 CentOS Stream 9 instances (1 Controller, 2 Execution Nodes, 1 Hop Node) • Pre-installed Ansible Automation Platform components • Network connectivity configured between all nodes • SSH keys pre-distributed for seamless communication
+
+Task 1: Set up Automation Mesh Infrastructure
+Subtask 1.1: Understand Automation Mesh Architecture
+An Automation Mesh is a distributed network of nodes that enables Ansible automation to scale across multiple locations, data centers, or cloud regions. The mesh consists of:
+
+• Control Nodes: Run the Automation Controller and manage job execution • Execution Nodes: Execute automation jobs and playbooks • Hop Nodes: Relay communication between nodes across network boundaries
+
+Subtask 1.2: Verify Lab Environment
+First, let's verify our lab environment and understand the node topology:
+
+# Check the hostname and IP of current node
+hostname
+ip addr show | grep inet
+# Verify SSH connectivity to all nodes
+ssh controller-node "hostname && date"
+ssh execution-node-1 "hostname && date"
+ssh execution-node-2 "hostname && date"
+ssh hop-node "hostname && date"
+Subtask 1.3: Install Automation Mesh Components
+On each node, we need to install the appropriate Automation Platform components:
+
+# On Controller Node - Install Automation Controller
+sudo dnf update -y
+sudo dnf install -y ansible-automation-platform-installer
+
+# Download the installer bundle
+cd /tmp
+wget https://releases.ansible.com/ansible-automation-platform/setup-bundle/ansible-automation-platform-setup-bundle-latest.tar.gz
+tar -xzf ansible-automation-platform-setup-bundle-latest.tar.gz
+cd ansible-automation-platform-setup-bundle-*
+Subtask 1.4: Configure Inventory for Mesh Setup
+Create the inventory file for mesh installation:
+
+# Create inventory file for mesh setup
+cat > inventory << 'EOF'
+[automationcontroller]
+controller-node ansible_host=10.0.1.10
+
+[automationmesh]
+execution-node-1 ansible_host=10.0.1.11 node_type=execution
+execution-node-2 ansible_host=10.0.1.12 node_type=execution
+hop-node ansible_host=10.0.1.13 node_type=hop
+
+[automationmesh:vars]
+peers=execution-node-1,execution-node-2,hop-node
+
+[all:vars]
+ansible_user=ec2-user
+ansible_ssh_private_key_file=/home/ec2-user/.ssh/id_rsa
+admin_password='RedHat123!'
+pg_host='controller-node'
+pg_port='5432'
+pg_database='awx'
+pg_username='awx'
+pg_password='RedHat123!'
+registry_url='registry.redhat.io'
+registry_username='your-registry-username'
+registry_password='your-registry-password'
+EOF
+Subtask 1.5: Generate SSL Certificates for Mesh
+Create SSL certificates for secure mesh communication:
+
+# Create certificate directory
+sudo mkdir -p /etc/automation-mesh/certs
+
+# Generate CA certificate
+sudo openssl genrsa -out /etc/automation-mesh/certs/ca-key.pem 4096
+sudo openssl req -new -x509 -days 365 -key /etc/automation-mesh/certs/ca-key.pem \
+    -out /etc/automation-mesh/certs/ca.pem -subj "/CN=Automation-Mesh-CA"
+
+# Generate node certificates for each mesh node
+for node in controller-node execution-node-1 execution-node-2 hop-node; do
+    sudo openssl genrsa -out /etc/automation-mesh/certs/${node}-key.pem 2048
+    sudo openssl req -new -key /etc/automation-mesh/certs/${node}-key.pem \
+        -out /etc/automation-mesh/certs/${node}.csr -subj "/CN=${node}"
+    sudo openssl x509 -req -days 365 -in /etc/automation-mesh/certs/${node}.csr \
+        -CA /etc/automation-mesh/certs/ca.pem -CAkey /etc/automation-mesh/certs/ca-key.pem \
+        -CAcreateserial -out /etc/automation-mesh/certs/${node}.pem
+done
+Task 2: Add Automation Controllers to the Mesh
+Subtask 2.1: Install Automation Controller
+Run the installation on the controller node:
+
+# Execute the installation
+sudo ./setup.sh -i inventory
+
+# This process may take 15-20 minutes
+# Monitor the installation progress
+tail -f /var/log/tower/setup-*.log
+Subtask 2.2: Configure Mesh Topology
+After installation, configure the mesh topology through the Automation Controller web interface:
+
+# Access the web interface
+echo "Access Automation Controller at: https://$(hostname -I | awk '{print $1}')"
+echo "Username: admin"
+echo "Password: RedHat123!"
+Subtask 2.3: Add Execution Nodes via API
+Use the Automation Controller API to add execution nodes:
+
+# Create API token first
+CONTROLLER_HOST="https://$(hostname -I | awk '{print $1}')"
+TOKEN=$(curl -k -X POST "${CONTROLLER_HOST}/api/v2/tokens/" \
+    -H "Content-Type: application/json" \
+    -d '{"description": "Mesh Setup Token", "scope": "write"}' \
+    -u admin:RedHat123! | jq -r '.token')
+
+# Add execution node 1
+curl -k -X POST "${CONTROLLER_HOST}/api/v2/instances/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "hostname": "execution-node-1",
+        "node_type": "execution",
+        "enabled": true,
+        "managed_by_policy": true
+    }'
+
+# Add execution node 2
+curl -k -X POST "${CONTROLLER_HOST}/api/v2/instances/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "hostname": "execution-node-2", 
+        "node_type": "execution",
+        "enabled": true,
+        "managed_by_policy": true
+    }'
+
+# Add hop node
+curl -k -X POST "${CONTROLLER_HOST}/api/v2/instances/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "hostname": "hop-node",
+        "node_type": "hop", 
+        "enabled": true,
+        "managed_by_policy": true
+    }'
+Subtask 2.4: Configure Mesh Networking
+Set up the mesh networking configuration:
+
+# Create mesh configuration file
+cat > /tmp/mesh-config.yml << 'EOF'
+---
+mesh_config:
+  controller_nodes:
+    - hostname: controller-node
+      ip: 10.0.1.10
+      
+  execution_nodes:
+    - hostname: execution-node-1
+      ip: 10.0.1.11
+      peers:
+        - execution-node-2
+        - hop-node
+    - hostname: execution-node-2
+      ip: 10.0.1.12
+      peers:
+        - execution-node-1
+        - hop-node
+        
+  hop_nodes:
+    - hostname: hop-node
+      ip: 10.0.1.13
+      peers:
+        - execution-node-1
+        - execution-node-2
+
+  network_settings:
+    receptor_port: 27199
+    control_service_port: 8013
+    work_signing_private_keyfile: /etc/automation-mesh/certs/work-signing-private.pem
+    work_signing_public_keyfile: /etc/automation-mesh/certs/work-signing-public.pem
+EOF
+Subtask 2.5: Deploy Mesh Configuration
+Deploy the mesh configuration to all nodes:
+
+# Copy configuration to all nodes
+for node in execution-node-1 execution-node-2 hop-node; do
+    scp /tmp/mesh-config.yml ${node}:/tmp/
+    ssh ${node} "sudo mv /tmp/mesh-config.yml /etc/automation-mesh/"
+done
+
+# Restart receptor service on all mesh nodes
+for node in execution-node-1 execution-node-2 hop-node; do
+    ssh ${node} "sudo systemctl restart receptor"
+    ssh ${node} "sudo systemctl enable receptor"
+done
+Task 3: Test Job Execution Across the Mesh
+Subtask 3.1: Create Test Inventory
+Create an inventory for testing job execution:
+
+# Create test inventory via API
+curl -k -X POST "${CONTROLLER_HOST}/api/v2/inventories/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "name": "Mesh Test Inventory",
+        "description": "Inventory for testing mesh execution",
+        "organization": 1
+    }'
+
+# Get inventory ID
+INVENTORY_ID=$(curl -k -X GET "${CONTROLLER_HOST}/api/v2/inventories/" \
+    -H "Authorization: Bearer ${TOKEN}" | jq -r '.results[] | select(.name=="Mesh Test Inventory") | .id')
+
+# Add hosts to inventory
+curl -k -X POST "${CONTROLLER_HOST}/api/v2/inventories/${INVENTORY_ID}/hosts/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "name": "test-host-1",
+        "variables": "ansible_host: execution-node-1\nansible_user: ec2-user"
+    }'
+
+curl -k -X POST "${CONTROLLER_HOST}/api/v2/inventories/${INVENTORY_ID}/hosts/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "name": "test-host-2", 
+        "variables": "ansible_host: execution-node-2\nansible_user: ec2-user"
+    }'
+Subtask 3.2: Create Test Playbook Project
+Create a project with test playbooks:
+
+# Create project directory
+mkdir -p /tmp/mesh-test-playbooks
+
+# Create a simple test playbook
+cat > /tmp/mesh-test-playbooks/mesh-test.yml << 'EOF'
+---
+- name: Mesh Execution Test
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Display node information
+      debug:
+        msg: |
+          Executing on: {{ inventory_hostname }}
+          Ansible node: {{ ansible_hostname }}
+          Execution node: {{ ansible_env.HOSTNAME | default('unknown') }}
+          Date/Time: {{ ansible_date_time.iso8601 }}
+          
+    - name: Create test file
+      file:
+        path: /tmp/mesh-test-{{ ansible_date_time.epoch }}.txt
+        state: touch
+        mode: '0644'
+      
+    - name: Write execution details
+      lineinfile:
+        path: /tmp/mesh-test-{{ ansible_date_time.epoch }}.txt
+        line: "Job executed on {{ inventory_hostname }} at {{ ansible_date_time.iso8601 }}"
+        create: yes
+
+    - name: Test network connectivity
+      uri:
+        url: "http://httpbin.org/ip"
+        method: GET
+      register: network_test
+      
+    - name: Display network test results
+      debug:
+        var: network_test.json
+EOF
+
+# Create performance test playbook
+cat > /tmp/mesh-test-playbooks/performance-test.yml << 'EOF'
+---
+- name: Mesh Performance Test
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: CPU intensive task
+      shell: |
+        start_time=$(date +%s)
+        for i in {1..1000}; do
+          echo "Processing iteration $i" > /dev/null
+        done
+        end_time=$(date +%s)
+        echo "Task completed in $((end_time - start_time)) seconds"
+      register: cpu_test
+      
+    - name: Display performance results
+      debug:
+        var: cpu_test.stdout
+        
+    - name: Memory usage check
+      shell: free -h
+      register: memory_check
+      
+    - name: Display memory usage
+      debug:
+        var: memory_check.stdout_lines
+EOF
+Subtask 3.3: Create Project in Automation Controller
+# Create project via API
+curl -k -X POST "${CONTROLLER_HOST}/api/v2/projects/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "name": "Mesh Test Project",
+        "description": "Project for testing mesh execution",
+        "organization": 1,
+        "scm_type": "manual",
+        "local_path": "mesh-test-playbooks"
+    }'
+
+# Copy playbooks to project directory
+sudo cp -r /tmp/mesh-test-playbooks /var/lib/awx/projects/
+sudo chown -R awx:awx /var/lib/awx/projects/mesh-test-playbooks
+Subtask 3.4: Create and Execute Job Templates
+Create job templates for testing:
+
+# Get project ID
+PROJECT_ID=$(curl -k -X GET "${CONTROLLER_HOST}/api/v2/projects/" \
+    -H "Authorization: Bearer ${TOKEN}" | jq -r '.results[] | select(.name=="Mesh Test Project") | .id')
+
+# Create job template for basic test
+curl -k -X POST "${CONTROLLER_HOST}/api/v2/job_templates/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "name": "Mesh Basic Test",
+        "description": "Basic mesh execution test",
+        "job_type": "run",
+        "inventory": '${INVENTORY_ID}',
+        "project": '${PROJECT_ID}',
+        "playbook": "mesh-test.yml",
+        "execution_environment": 1
+    }'
+
+# Create job template for performance test
+curl -k -X POST "${CONTROLLER_HOST}/api/v2/job_templates/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "name": "Mesh Performance Test",
+        "description": "Performance test across mesh",
+        "job_type": "run", 
+        "inventory": '${INVENTORY_ID}',
+        "project": '${PROJECT_ID}',
+        "playbook": "performance-test.yml",
+        "execution_environment": 1
+    }'
+Subtask 3.5: Execute Test Jobs
+Launch test jobs and monitor execution:
+
+# Get job template IDs
+BASIC_TEMPLATE_ID=$(curl -k -X GET "${CONTROLLER_HOST}/api/v2/job_templates/" \
+    -H "Authorization: Bearer ${TOKEN}" | jq -r '.results[] | select(.name=="Mesh Basic Test") | .id')
+
+PERF_TEMPLATE_ID=$(curl -k -X GET "${CONTROLLER_HOST}/api/v2/job_templates/" \
+    -H "Authorization: Bearer ${TOKEN}" | jq -r '.results[] | select(.name=="Mesh Performance Test") | .id')
+
+# Launch basic test job
+BASIC_JOB_ID=$(curl -k -X POST "${CONTROLLER_HOST}/api/v2/job_templates/${BASIC_TEMPLATE_ID}/launch/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{}' | jq -r '.id')
+
+echo "Basic test job launched with ID: ${BASIC_JOB_ID}"
+
+# Monitor job status
+while true; do
+    STATUS=$(curl -k -X GET "${CONTROLLER_HOST}/api/v2/jobs/${BASIC_JOB_ID}/" \
+        -H "Authorization: Bearer ${TOKEN}" | jq -r '.status')
+    echo "Job status: ${STATUS}"
+    if [[ "${STATUS}" == "successful" || "${STATUS}" == "failed" || "${STATUS}" == "error" ]]; then
+        break
+    fi
+    sleep 5
+done
+
+# Launch performance test job
+PERF_JOB_ID=$(curl -k -X POST "${CONTROLLER_HOST}/api/v2/job_templates/${PERF_TEMPLATE_ID}/launch/" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{}' | jq -r '.id')
+
+echo "Performance test job launched with ID: ${PERF_JOB_ID}"
+Subtask 3.6: Verify Mesh Execution
+Verify that jobs are executing across different mesh nodes:
+
+# Check receptor status on all nodes
+echo "=== Receptor Status on All Nodes ==="
+for node in controller-node execution-node-1 execution-node-2 hop-node; do
+    echo "--- ${node} ---"
+    ssh ${node} "sudo systemctl status receptor --no-pager -l"
+    echo ""
+done
+
+# Check mesh connectivity
+echo "=== Mesh Connectivity Test ==="
+ssh execution-node-1 "receptorctl --socket /var/run/receptor/receptor.sock status"
+
+# Verify job distribution
+echo "=== Job Execution Verification ==="
+curl -k -X GET "${CONTROLLER_HOST}/api/v2/jobs/${BASIC_JOB_ID}/" \
+    -H "Authorization: Bearer ${TOKEN}" | jq '.execution_node'
+
+curl -k -X GET "${CONTROLLER_HOST}/api/v2/jobs/${PERF_JOB_ID}/" \
+    -H "Authorization: Bearer ${TOKEN}" | jq '.execution_node'
+Subtask 3.7: Monitor Mesh Performance
+Create monitoring scripts to track mesh performance:
+
+# Create mesh monitoring script
+cat > /tmp/mesh-monitor.sh << 'EOF'
+#!/bin/bash
+
+echo "=== Automation Mesh Status Report ==="
+echo "Generated at: $(date)"
+echo ""
+
+# Check controller status
+echo "--- Controller Node Status ---"
+systemctl is-active automation-controller-web
+systemctl is-active automation-controller-task
+echo ""
+
+# Check execution nodes
+for node in execution-node-1 execution-node-2; do
+    echo "--- ${node} Status ---"
+    ssh ${node} "systemctl is-active receptor"
+    ssh ${node} "ps aux | grep receptor | grep -v grep | wc -l"
+    echo ""
+done
+
+# Check hop node
+echo "--- Hop Node Status ---"
+ssh hop-node "systemctl is-active receptor"
+ssh hop-node "ps aux | grep receptor | grep -v grep | wc -l"
+echo ""
+
+# Network connectivity test
+echo "--- Network Connectivity ---"
+for node in execution-node-1 execution-node-2 hop-node; do
+    echo "Ping to ${node}: $(ping -c 1 ${node} >/dev/null 2>&1 && echo 'OK' || echo 'FAILED')"
+done
+echo ""
+
+# Recent job execution summary
+echo "--- Recent Job Summary ---"
+curl -k -s -X GET "${CONTROLLER_HOST}/api/v2/jobs/?page_size=5" \
+    -H "Authorization: Bearer ${TOKEN}" | \
+    jq -r '.results[] | "\(.id): \(.name) - \(.status) on \(.execution_node // "controller")"'
+EOF
+
+chmod +x /tmp/mesh-monitor.sh
+/tmp/mesh-monitor.sh
+Troubleshooting Common Issues
+Issue 1: Receptor Service Not Starting
+# Check receptor configuration
+sudo cat /etc/receptor/receptor.conf
+
+# Check receptor logs
+sudo journalctl -u receptor -f
+
+# Restart receptor with debug logging
+sudo systemctl stop receptor
+sudo receptor --config /etc/receptor/receptor.conf --log-level debug
+Issue 2: Mesh Nodes Not Communicating
+# Check firewall settings
+sudo firewall-cmd --list-all
+
+# Open required ports
+sudo firewall-cmd --permanent --add-port=27199/tcp
+sudo firewall-cmd --permanent --add-port=8013/tcp
+sudo firewall-cmd --reload
+
+# Test network connectivity
+telnet execution-node-1 27199
+Issue 3: Jobs Not Distributing Across Nodes
+# Check instance group configuration
+curl -k -X GET "${CONTROLLER_HOST}/api/v2/instance_groups/" \
+    -H "Authorization: Bearer ${TOKEN}" | jq '.results'
+
+# Verify node capacity
+curl -k -X GET "${CONTROLLER_HOST}/api/v2/instances/" \
+    -H "Authorization: Bearer ${TOKEN}" | jq '.results[] | {hostname, capacity, enabled}'
+Conclusion
+Congratulations! You have successfully built and tested an Automation Mesh infrastructure. Here's what you accomplished:
+
+Key Achievements: • Mesh Infrastructure: Set up a distributed automation mesh with controller, execution, and hop nodes • Secure Communication: Implemented SSL certificates and secure receptor networking • Job Distribution: Configured job templates to execute across multiple mesh nodes • Performance Testing: Created and executed test playbooks to verify mesh functionality • Monitoring: Implemented monitoring scripts to track mesh health and performance
+
+Why This Matters: • Scalability: Automation Mesh enables scaling Ansible automation across multiple regions and data centers • Resilience: Distributed execution provides fault tolerance and high availability • Performance: Load distribution across multiple execution nodes improves job throughput • Security: Encrypted communication and certificate-based authentication ensure secure operations • Flexibility: Hop nodes enable automation across network boundaries and air-gapped environments
+
+Real-World Applications: • Multi-cloud automation deployments • Hybrid cloud infrastructure management • Edge computing automation • Disaster recovery and business continuity • Compliance and security automation across distributed environments
+
+Your Automation Mesh is now ready for production workloads and can be extended with additional nodes as your automation requirements grow. The mesh architecture provides the foundation for enterprise-scale automation that can adapt to your organization's evolving infrastructure needs.
