@@ -1,0 +1,60 @@
+---
+- name: Comprehensive Performance Optimized Playbook
+  hosts: all
+  gather_facts: smart  # Only gather facts when needed
+  strategy: free
+  vars:
+    ansible_ssh_pipelining: true
+    ansible_ssh_multiplexing: true
+    performance_test_enabled: true
+    
+  pre_tasks:
+    - name: Start performance monitoring
+      set_fact:
+        job_start_time: "{{ ansible_date_time.epoch }}"
+      when: performance_test_enabled
+      
+  tasks:
+    - name: Optimized system information gathering
+      setup:
+        filter: "ansible_processor*,ansible_memory*"
+      when: ansible_facts is not defined
+      
+    - name: Parallel file operations
+      copy:
+        content: |
+          Optimized content for {{ inventory_hostname }}
+          Generated at: {{ ansible_date_time.iso8601 }}
+          Job ID: {{ tower_job_id | default('manual') }}
+        dest: "/tmp/optimized_{{ inventory_hostname }}.txt"
+      register: file_creation
+      
+    - name: Batch verification
+      stat:
+        path: "/tmp/optimized_{{ inventory_hostname }}.txt"
+      register: file_verification
+      
+    - name: Performance calculation task
+      shell: |
+        python3 -c "
+        import time
+        start = time.time()
+        result = sum(i*i for i in range(10000))
+        print(f'Calculation result: {result}')
+        print(f'Execution time: {time.time() - start:.4f} seconds')
+        "
+      register: calc_result
+      
+  post_tasks:
+    - name: Record job completion metrics
+      lineinfile:
+        path: /tmp/final_performance_log.txt
+        line: "{{ ansible_date_time.iso8601 }},FINAL_OPTIMIZED,{{ ansible_date_time.epoch | int - job_start_time | int }},{{ inventory_hostname }},{{ tower_job_id | default('manual') }}"
+        create: yes
+      when: performance_test_enabled
+      
+    - name: Clean up temporary files
+      file:
+        path: "/tmp/optimized_{{ inventory_hostname }}.txt"
+        state: absent
+      ignore_errors: yes

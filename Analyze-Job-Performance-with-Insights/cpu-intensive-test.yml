@@ -1,0 +1,43 @@
+---
+- name: CPU Intensive Performance Test
+  hosts: all
+  gather_facts: yes
+  vars:
+    test_duration: 30
+    
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: CPU intensive task - calculate prime numbers
+      shell: |
+        python3 -c "
+        import time
+        start = time.time()
+        def is_prime(n):
+            if n < 2: return False
+            for i in range(2, int(n**0.5) + 1):
+                if n % i == 0: return False
+            return True
+        
+        primes = [n for n in range(2, 10000) if is_prime(n)]
+        print(f'Found {len(primes)} prime numbers')
+        print(f'Execution time: {time.time() - start:.2f} seconds')
+        "
+      register: cpu_test_result
+      
+    - name: Display CPU test results
+      debug:
+        var: cpu_test_result.stdout_lines
+        
+    - name: Record end time and calculate duration
+      set_fact:
+        end_time: "{{ ansible_date_time.epoch }}"
+        duration: "{{ ansible_date_time.epoch | int - start_time | int }}"
+        
+    - name: Log performance metrics
+      lineinfile:
+        path: /tmp/performance_log.txt
+        line: "{{ ansible_date_time.iso8601 }},CPU_TEST,{{ duration }},{{ inventory_hostname }}"
+        create: yes

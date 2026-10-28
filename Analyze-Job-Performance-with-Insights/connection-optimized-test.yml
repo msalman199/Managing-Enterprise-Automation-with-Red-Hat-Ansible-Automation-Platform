@@ -1,0 +1,38 @@
+---
+- name: Connection Optimized Performance Test
+  hosts: all
+  gather_facts: no  # Skip fact gathering for faster execution
+  strategy: free
+  vars:
+    ansible_ssh_pipelining: true  # Enable SSH pipelining
+    ansible_ssh_multiplexing: true  # Enable connection multiplexing
+    
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: Batch file operations
+      copy:
+        content: "Test content {{ item }}"
+        dest: "/tmp/batch_test_{{ item }}.txt"
+      loop: "{{ range(1, 11) | list }}"
+      register: batch_results
+      
+    - name: Verify all files created
+      stat:
+        path: "/tmp/batch_test_{{ item }}.txt"
+      loop: "{{ range(1, 11) | list }}"
+      register: file_stats
+      
+    - name: Clean up test files
+      file:
+        path: "/tmp/batch_test_{{ item }}.txt"
+        state: absent
+      loop: "{{ range(1, 11) | list }}"
+      
+    - name: Log performance metrics
+      lineinfile:
+        path: /tmp/performance_log_optimized.txt
+        line: "{{ ansible_date_time.iso8601 }},CONNECTION_OPTIMIZED,{{ ansible_date_time.epoch | int - start_time | int }},{{ inventory_hostname }}"
+        create: yes

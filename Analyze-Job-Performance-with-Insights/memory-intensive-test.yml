@@ -1,0 +1,46 @@
+---
+- name: Memory Intensive Performance Test
+  hosts: all
+  gather_facts: yes
+  
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: Check available memory
+      shell: free -m | grep '^Mem:' | awk '{print $7}'
+      register: available_memory
+      
+    - name: Memory intensive task - create large data structures
+      shell: |
+        python3 -c "
+        import time
+        import sys
+        start = time.time()
+        
+        # Create large lists to consume memory
+        data = []
+        for i in range(100000):
+            data.append([j for j in range(100)])
+        
+        print(f'Created data structure with {len(data)} elements')
+        print(f'Memory usage: {sys.getsizeof(data) / 1024 / 1024:.2f} MB')
+        print(f'Execution time: {time.time() - start:.2f} seconds')
+        "
+      register: memory_test_result
+      
+    - name: Display memory test results
+      debug:
+        var: memory_test_result.stdout_lines
+        
+    - name: Record performance metrics
+      set_fact:
+        end_time: "{{ ansible_date_time.epoch }}"
+        duration: "{{ ansible_date_time.epoch | int - start_time | int }}"
+        
+    - name: Log performance metrics
+      lineinfile:
+        path: /tmp/performance_log.txt
+        line: "{{ ansible_date_time.iso8601 }},MEMORY_TEST,{{ duration }},{{ inventory_hostname }}"
+        create: yes

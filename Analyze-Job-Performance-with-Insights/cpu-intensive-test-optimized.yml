@@ -1,0 +1,60 @@
+---
+- name: Optimized CPU Intensive Performance Test
+  hosts: all
+  gather_facts: yes
+  strategy: free  # Allow parallel execution
+  vars:
+    test_duration: 30
+    
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: Optimized CPU intensive task - parallel prime calculation
+      shell: |
+        python3 -c "
+        import time
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+        
+        start = time.time()
+        
+        def is_prime(n):
+            if n < 2: return False
+            for i in range(2, int(n**0.5) + 1):
+                if n % i == 0: return False
+            return True
+        
+        def find_primes_in_range(start_range, end_range):
+            return [n for n in range(start_range, end_range) if is_prime(n)]
+        
+        # Use multiple processes for parallel computation
+        cpu_count = multiprocessing.cpu_count()
+        chunk_size = 10000 // cpu_count
+        
+        with ProcessPoolExecutor(max_workers=cpu_count) as executor:
+            futures = []
+            for i in range(cpu_count):
+                start_range = i * chunk_size + 2
+                end_range = (i + 1) * chunk_size + 2
+                futures.append(executor.submit(find_primes_in_range, start_range, end_range))
+            
+            all_primes = []
+            for future in futures:
+                all_primes.extend(future.result())
+        
+        print(f'Found {len(all_primes)} prime numbers using {cpu_count} processes')
+        print(f'Execution time: {time.time() - start:.2f} seconds')
+        "
+      register: cpu_test_result
+      
+    - name: Display optimized CPU test results
+      debug:
+        var: cpu_test_result.stdout_lines
+        
+    - name: Log performance metrics
+      lineinfile:
+        path: /tmp/performance_log_optimized.txt
+        line: "{{ ansible_date_time.iso8601 }},CPU_TEST_OPTIMIZED,{{ ansible_date_time.epoch | int - start_time | int }},{{ inventory_hostname }}"
+        create: yes

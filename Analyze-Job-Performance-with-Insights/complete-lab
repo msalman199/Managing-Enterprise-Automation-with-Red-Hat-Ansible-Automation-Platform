@@ -1,0 +1,829 @@
+Lab 12: Analyze Job Performance with Insights
+Objectives
+By the end of this lab, you will be able to:
+
+• Configure and enable Red Hat Insights integration with Ansible Automation Platform • Monitor automation job execution times, resource usage, and error patterns • Analyze performance metrics using Insights dashboard and reporting features • Identify performance bottlenecks and optimization opportunities • Implement performance improvements based on Insights recommendations • Create custom performance monitoring workflows for continuous optimization
+
+Prerequisites
+Before starting this lab, you should have:
+
+• Basic understanding of Ansible playbooks and automation concepts • Familiarity with Red Hat Ansible Automation Platform (AAP) interface • Knowledge of Linux command line operations • Understanding of system performance monitoring concepts • Completed previous labs in the Managing Enterprise Automation series • Access to Red Hat Customer Portal account (for Insights registration)
+
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own VM or install software.
+
+Your lab environment includes: • Red Hat Enterprise Linux 9 control node with Ansible Automation Platform • Multiple managed nodes for testing automation jobs • Pre-installed Insights client and monitoring tools • Sample playbooks and job templates for performance testing
+
+Task 1: Enable Insights Integration
+Subtask 1.1: Install and Configure Insights Client
+First, we'll install the Red Hat Insights client on our control node and register the system.
+
+Connect to your control node and verify the current system status:
+# Check system information
+hostnamectl
+cat /etc/redhat-release
+Install the Insights client package:
+# Install insights-client
+sudo dnf install -y insights-client
+
+# Verify installation
+insights-client --version
+Register the system with Red Hat Insights:
+# Register with Insights (you'll need Red Hat credentials)
+sudo insights-client --register
+
+# Check registration status
+sudo insights-client --status
+Configure Insights for Ansible integration:
+# Create Insights configuration directory
+sudo mkdir -p /etc/insights-client/
+
+# Create custom configuration file
+sudo tee /etc/insights-client/insights-client.conf << 'EOF'
+[insights-client]
+# Enable Ansible-specific data collection
+ansible=True
+# Set collection frequency
+auto_config=True
+# Enable performance monitoring
+performance_monitoring=True
+EOF
+Subtask 1.2: Configure Automation Platform for Insights
+Access the Automation Platform web interface and navigate to Settings > Miscellaneous System
+
+Enable Insights integration by configuring the following settings:
+
+# Create automation platform insights configuration
+sudo tee /etc/tower/conf.d/insights.py << 'EOF'
+# Enable Insights integration
+INSIGHTS_TRACKING_STATE = True
+INSIGHTS_DATA_COLLECTION = True
+
+# Configure data collection intervals
+INSIGHTS_COLLECTION_INTERVAL = 3600  # 1 hour
+
+# Enable job performance tracking
+INSIGHTS_JOB_TRACKING = True
+INSIGHTS_PERFORMANCE_METRICS = True
+EOF
+Restart Automation Platform services to apply the configuration:
+# Restart automation platform services
+sudo systemctl restart automation-platform-installer
+sudo systemctl status automation-platform-installer
+Subtask 1.3: Verify Insights Integration
+Test the Insights connection:
+# Run insights client test
+sudo insights-client --test-connection
+
+# Check for any collection errors
+sudo insights-client --check-results
+Verify data collection is working:
+# Force an immediate data collection
+sudo insights-client --force-reregister
+
+# Check the logs for successful upload
+sudo tail -f /var/log/insights-client/insights-client.log
+Task 2: Monitor Job Execution Times and Errors
+Subtask 2.1: Create Performance Test Playbooks
+We'll create several playbooks with different performance characteristics to generate meaningful monitoring data.
+
+Create a directory for test playbooks:
+# Create test directory
+mkdir -p ~/performance-tests
+cd ~/performance-tests
+Create a CPU-intensive test playbook:
+# Create CPU intensive playbook
+cat > cpu-intensive-test.yml << 'EOF'
+---
+- name: CPU Intensive Performance Test
+  hosts: all
+  gather_facts: yes
+  vars:
+    test_duration: 30
+    
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: CPU intensive task - calculate prime numbers
+      shell: |
+        python3 -c "
+        import time
+        start = time.time()
+        def is_prime(n):
+            if n < 2: return False
+            for i in range(2, int(n**0.5) + 1):
+                if n % i == 0: return False
+            return True
+        
+        primes = [n for n in range(2, 10000) if is_prime(n)]
+        print(f'Found {len(primes)} prime numbers')
+        print(f'Execution time: {time.time() - start:.2f} seconds')
+        "
+      register: cpu_test_result
+      
+    - name: Display CPU test results
+      debug:
+        var: cpu_test_result.stdout_lines
+        
+    - name: Record end time and calculate duration
+      set_fact:
+        end_time: "{{ ansible_date_time.epoch }}"
+        duration: "{{ ansible_date_time.epoch | int - start_time | int }}"
+        
+    - name: Log performance metrics
+      lineinfile:
+        path: /tmp/performance_log.txt
+        line: "{{ ansible_date_time.iso8601 }},CPU_TEST,{{ duration }},{{ inventory_hostname }}"
+        create: yes
+EOF
+Create a memory-intensive test playbook:
+# Create memory intensive playbook
+cat > memory-intensive-test.yml << 'EOF'
+---
+- name: Memory Intensive Performance Test
+  hosts: all
+  gather_facts: yes
+  
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: Check available memory
+      shell: free -m | grep '^Mem:' | awk '{print $7}'
+      register: available_memory
+      
+    - name: Memory intensive task - create large data structures
+      shell: |
+        python3 -c "
+        import time
+        import sys
+        start = time.time()
+        
+        # Create large lists to consume memory
+        data = []
+        for i in range(100000):
+            data.append([j for j in range(100)])
+        
+        print(f'Created data structure with {len(data)} elements')
+        print(f'Memory usage: {sys.getsizeof(data) / 1024 / 1024:.2f} MB')
+        print(f'Execution time: {time.time() - start:.2f} seconds')
+        "
+      register: memory_test_result
+      
+    - name: Display memory test results
+      debug:
+        var: memory_test_result.stdout_lines
+        
+    - name: Record performance metrics
+      set_fact:
+        end_time: "{{ ansible_date_time.epoch }}"
+        duration: "{{ ansible_date_time.epoch | int - start_time | int }}"
+        
+    - name: Log performance metrics
+      lineinfile:
+        path: /tmp/performance_log.txt
+        line: "{{ ansible_date_time.iso8601 }},MEMORY_TEST,{{ duration }},{{ inventory_hostname }}"
+        create: yes
+EOF
+Create a network-intensive test playbook:
+# Create network intensive playbook
+cat > network-intensive-test.yml << 'EOF'
+---
+- name: Network Intensive Performance Test
+  hosts: all
+  gather_facts: yes
+  
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: Network intensive task - multiple file transfers
+      get_url:
+        url: "https://httpbin.org/bytes/{{ item }}"
+        dest: "/tmp/test_file_{{ item }}.dat"
+        timeout: 30
+      loop:
+        - 1024
+        - 2048
+        - 4096
+      register: download_results
+      ignore_errors: yes
+      
+    - name: Calculate total download time
+      set_fact:
+        total_download_time: "{{ download_results.results | map(attribute='elapsed') | sum }}"
+        
+    - name: Display network test results
+      debug:
+        msg: "Total download time: {{ total_download_time }} seconds"
+        
+    - name: Clean up test files
+      file:
+        path: "/tmp/test_file_{{ item }}.dat"
+        state: absent
+      loop:
+        - 1024
+        - 2048
+        - 4096
+        
+    - name: Record performance metrics
+      set_fact:
+        end_time: "{{ ansible_date_time.epoch }}"
+        duration: "{{ ansible_date_time.epoch | int - start_time | int }}"
+        
+    - name: Log performance metrics
+      lineinfile:
+        path: /tmp/performance_log.txt
+        line: "{{ ansible_date_time.iso8601 }},NETWORK_TEST,{{ duration }},{{ inventory_hostname }}"
+        create: yes
+EOF
+Subtask 2.2: Create Job Templates for Performance Testing
+Access the Automation Platform web interface and create job templates for each test playbook.
+
+Create CPU Test Job Template:
+
+Name: CPU Performance Test
+Job Type: Run
+Inventory: Demo Inventory
+Project: Create a new project pointing to your test playbooks
+Playbook: cpu-intensive-test.yml
+Enable Gather Facts
+Create Memory Test Job Template:
+
+Name: Memory Performance Test
+Job Type: Run
+Inventory: Demo Inventory
+Project: Same as above
+Playbook: memory-intensive-test.yml
+Create Network Test Job Template:
+
+Name: Network Performance Test
+Job Type: Run
+Inventory: Demo Inventory
+Project: Same as above
+Playbook: network-intensive-test.yml
+Subtask 2.3: Execute Performance Tests and Collect Data
+Run the performance test jobs multiple times to generate data:
+# Use awx-cli to run jobs programmatically (if available)
+# Or run through the web interface
+
+# Create a script to run multiple test iterations
+cat > run_performance_tests.sh << 'EOF'
+#!/bin/bash
+
+echo "Starting performance test suite..."
+echo "Timestamp,Test_Type,Duration,Host" > /tmp/performance_summary.csv
+
+# Run each test 5 times
+for i in {1..5}; do
+    echo "Running test iteration $i..."
+    
+    # You would trigger these through the web interface or API
+    echo "Run CPU test $i"
+    echo "Run Memory test $i" 
+    echo "Run Network test $i"
+    
+    # Wait between iterations
+    sleep 60
+done
+
+echo "Performance tests completed!"
+EOF
+
+chmod +x run_performance_tests.sh
+Monitor job execution in real-time:
+# Create a monitoring script
+cat > monitor_jobs.sh << 'EOF'
+#!/bin/bash
+
+# Monitor system resources during job execution
+echo "Monitoring system performance..."
+
+# Create log file with headers
+echo "Timestamp,CPU_Usage,Memory_Usage,Load_Average,Active_Jobs" > /tmp/system_performance.csv
+
+while true; do
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+    memory_usage=$(free | grep Mem | awk '{printf "%.2f", $3/$2 * 100.0}')
+    load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ',')
+    
+    # Count active ansible processes
+    active_jobs=$(ps aux | grep -c '[a]nsible-playbook')
+    
+    echo "$timestamp,$cpu_usage,$memory_usage,$load_avg,$active_jobs" >> /tmp/system_performance.csv
+    
+    sleep 30
+done
+EOF
+
+chmod +x monitor_jobs.sh
+Start monitoring and run tests:
+# Start monitoring in background
+./monitor_jobs.sh &
+MONITOR_PID=$!
+
+# Run your performance tests through the web interface
+echo "Monitor PID: $MONITOR_PID"
+echo "Run your job templates now through the web interface"
+echo "Press Enter when tests are complete..."
+read
+
+# Stop monitoring
+kill $MONITOR_PID
+Task 3: Optimize Job Performance Based on Insights Feedback
+Subtask 3.1: Analyze Performance Data with Insights
+Access Red Hat Insights dashboard through the Customer Portal:
+
+Navigate to https://console.redhat.com/insights
+Select your registered system
+Look for Automation or Ansible specific insights
+Create a local analysis script to process collected performance data:
+
+# Create performance analysis script
+cat > analyze_performance.py << 'EOF'
+#!/usr/bin/env python3
+
+import csv
+import json
+import statistics
+from datetime import datetime
+import matplotlib.pyplot as plt
+import pandas as pd
+
+def analyze_performance_logs():
+    """Analyze performance test results"""
+    
+    # Read performance data
+    performance_data = []
+    
+    try:
+        with open('/tmp/performance_log.txt', 'r') as f:
+            for line in f:
+                parts = line.strip().split(',')
+                if len(parts) >= 4:
+                    performance_data.append({
+                        'timestamp': parts[0],
+                        'test_type': parts[1],
+                        'duration': float(parts[2]),
+                        'host': parts[3]
+                    })
+    except FileNotFoundError:
+        print("Performance log file not found. Run some tests first.")
+        return
+    
+    # Analyze by test type
+    test_types = {}
+    for record in performance_data:
+        test_type = record['test_type']
+        if test_type not in test_types:
+            test_types[test_type] = []
+        test_types[test_type].append(record['duration'])
+    
+    # Generate statistics
+    print("Performance Analysis Report")
+    print("=" * 50)
+    
+    for test_type, durations in test_types.items():
+        print(f"\n{test_type} Performance:")
+        print(f"  Average Duration: {statistics.mean(durations):.2f} seconds")
+        print(f"  Median Duration: {statistics.median(durations):.2f} seconds")
+        print(f"  Min Duration: {min(durations):.2f} seconds")
+        print(f"  Max Duration: {max(durations):.2f} seconds")
+        print(f"  Standard Deviation: {statistics.stdev(durations):.2f} seconds")
+        print(f"  Total Runs: {len(durations)}")
+    
+    # Identify performance issues
+    print("\nPerformance Recommendations:")
+    print("-" * 30)
+    
+    for test_type, durations in test_types.items():
+        avg_duration = statistics.mean(durations)
+        std_dev = statistics.stdev(durations) if len(durations) > 1 else 0
+        
+        if std_dev > avg_duration * 0.3:
+            print(f"⚠️  {test_type}: High variability detected (std dev: {std_dev:.2f})")
+            print("   Recommendation: Check for resource contention or network issues")
+        
+        if avg_duration > 60:
+            print(f"⚠️  {test_type}: Long execution time (avg: {avg_duration:.2f}s)")
+            print("   Recommendation: Consider optimization or parallel execution")
+    
+    return test_types
+
+def analyze_system_performance():
+    """Analyze system resource usage during tests"""
+    
+    try:
+        df = pd.read_csv('/tmp/system_performance.csv')
+        
+        print("\nSystem Resource Analysis:")
+        print("=" * 30)
+        print(f"Average CPU Usage: {df['CPU_Usage'].mean():.2f}%")
+        print(f"Peak CPU Usage: {df['CPU_Usage'].max():.2f}%")
+        print(f"Average Memory Usage: {df['Memory_Usage'].mean():.2f}%")
+        print(f"Peak Memory Usage: {df['Memory_Usage'].max():.2f}%")
+        print(f"Average Load: {df['Load_Average'].mean():.2f}")
+        print(f"Peak Load: {df['Load_Average'].max():.2f}")
+        
+        # Identify resource bottlenecks
+        if df['CPU_Usage'].max() > 80:
+            print("⚠️  CPU bottleneck detected during tests")
+        if df['Memory_Usage'].max() > 80:
+            print("⚠️  Memory bottleneck detected during tests")
+        if df['Load_Average'].max() > 4:
+            print("⚠️  High system load detected during tests")
+            
+    except FileNotFoundError:
+        print("System performance log not found.")
+
+if __name__ == "__main__":
+    # Install required packages if not available
+    try:
+        import pandas as pd
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("Installing required packages...")
+        import subprocess
+        subprocess.run(["pip3", "install", "pandas", "matplotlib"])
+        import pandas as pd
+        import matplotlib.pyplot as plt
+    
+    analyze_performance_logs()
+    analyze_system_performance()
+EOF
+
+chmod +x analyze_performance.py
+Run the performance analysis:
+# Install Python dependencies
+pip3 install pandas matplotlib --user
+
+# Run analysis
+python3 analyze_performance.py
+Subtask 3.2: Implement Performance Optimizations
+Based on the analysis results, we'll implement several optimization strategies.
+
+Create optimized versions of the test playbooks:
+# Create optimized CPU test playbook
+cat > cpu-intensive-test-optimized.yml << 'EOF'
+---
+- name: Optimized CPU Intensive Performance Test
+  hosts: all
+  gather_facts: yes
+  strategy: free  # Allow parallel execution
+  vars:
+    test_duration: 30
+    
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: Optimized CPU intensive task - parallel prime calculation
+      shell: |
+        python3 -c "
+        import time
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+        
+        start = time.time()
+        
+        def is_prime(n):
+            if n < 2: return False
+            for i in range(2, int(n**0.5) + 1):
+                if n % i == 0: return False
+            return True
+        
+        def find_primes_in_range(start_range, end_range):
+            return [n for n in range(start_range, end_range) if is_prime(n)]
+        
+        # Use multiple processes for parallel computation
+        cpu_count = multiprocessing.cpu_count()
+        chunk_size = 10000 // cpu_count
+        
+        with ProcessPoolExecutor(max_workers=cpu_count) as executor:
+            futures = []
+            for i in range(cpu_count):
+                start_range = i * chunk_size + 2
+                end_range = (i + 1) * chunk_size + 2
+                futures.append(executor.submit(find_primes_in_range, start_range, end_range))
+            
+            all_primes = []
+            for future in futures:
+                all_primes.extend(future.result())
+        
+        print(f'Found {len(all_primes)} prime numbers using {cpu_count} processes')
+        print(f'Execution time: {time.time() - start:.2f} seconds')
+        "
+      register: cpu_test_result
+      
+    - name: Display optimized CPU test results
+      debug:
+        var: cpu_test_result.stdout_lines
+        
+    - name: Log performance metrics
+      lineinfile:
+        path: /tmp/performance_log_optimized.txt
+        line: "{{ ansible_date_time.iso8601 }},CPU_TEST_OPTIMIZED,{{ ansible_date_time.epoch | int - start_time | int }},{{ inventory_hostname }}"
+        create: yes
+EOF
+Create a playbook with connection optimization:
+# Create connection-optimized playbook
+cat > connection-optimized-test.yml << 'EOF'
+---
+- name: Connection Optimized Performance Test
+  hosts: all
+  gather_facts: no  # Skip fact gathering for faster execution
+  strategy: free
+  vars:
+    ansible_ssh_pipelining: true  # Enable SSH pipelining
+    ansible_ssh_multiplexing: true  # Enable connection multiplexing
+    
+  tasks:
+    - name: Record start time
+      set_fact:
+        start_time: "{{ ansible_date_time.epoch }}"
+    
+    - name: Batch file operations
+      copy:
+        content: "Test content {{ item }}"
+        dest: "/tmp/batch_test_{{ item }}.txt"
+      loop: "{{ range(1, 11) | list }}"
+      register: batch_results
+      
+    - name: Verify all files created
+      stat:
+        path: "/tmp/batch_test_{{ item }}.txt"
+      loop: "{{ range(1, 11) | list }}"
+      register: file_stats
+      
+    - name: Clean up test files
+      file:
+        path: "/tmp/batch_test_{{ item }}.txt"
+        state: absent
+      loop: "{{ range(1, 11) | list }}"
+      
+    - name: Log performance metrics
+      lineinfile:
+        path: /tmp/performance_log_optimized.txt
+        line: "{{ ansible_date_time.iso8601 }},CONNECTION_OPTIMIZED,{{ ansible_date_time.epoch | int - start_time | int }},{{ inventory_hostname }}"
+        create: yes
+EOF
+Create an Ansible configuration file with performance optimizations:
+# Create optimized ansible.cfg
+cat > ansible.cfg << 'EOF'
+[defaults]
+# Connection optimizations
+host_key_checking = False
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o ControlPath=/tmp/ansible-ssh-%h-%p-%r
+pipelining = True
+
+# Performance optimizations
+forks = 20
+gathering = smart
+fact_caching = jsonfile
+fact_caching_connection = /tmp/ansible_facts_cache
+fact_caching_timeout = 3600
+
+# Reduce verbosity for better performance
+stdout_callback = minimal
+bin_ansible_callbacks = True
+
+# Callback optimizations
+callback_whitelist = timer, profile_tasks
+
+[ssh_connection]
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o ControlPath=/tmp/ansible-ssh-%h-%p-%r
+pipelining = True
+control_path_dir = /tmp
+EOF
+Subtask 3.3: Compare Performance Before and After Optimization
+Create a comprehensive comparison script:
+# Create performance comparison script
+cat > compare_performance.py << 'EOF'
+#!/usr/bin/env python3
+
+import csv
+import json
+import statistics
+from datetime import datetime
+
+def read_performance_data(filename):
+    """Read performance data from log file"""
+    data = []
+    try:
+        with open(filename, 'r') as f:
+            for line in f:
+                parts = line.strip().split(',')
+                if len(parts) >= 4:
+                    data.append({
+                        'timestamp': parts[0],
+                        'test_type': parts[1],
+                        'duration': float(parts[2]),
+                        'host': parts[3]
+                    })
+    except FileNotFoundError:
+        print(f"File {filename} not found.")
+    return data
+
+def compare_performance():
+    """Compare original vs optimized performance"""
+    
+    original_data = read_performance_data('/tmp/performance_log.txt')
+    optimized_data = read_performance_data('/tmp/performance_log_optimized.txt')
+    
+    print("Performance Comparison Report")
+    print("=" * 50)
+    
+    # Group data by test type
+    original_by_type = {}
+    optimized_by_type = {}
+    
+    for record in original_data:
+        test_type = record['test_type']
+        if test_type not in original_by_type:
+            original_by_type[test_type] = []
+        original_by_type[test_type].append(record['duration'])
+    
+    for record in optimized_data:
+        test_type = record['test_type'].replace('_OPTIMIZED', '')
+        if test_type not in optimized_by_type:
+            optimized_by_type[test_type] = []
+        optimized_by_type[test_type].append(record['duration'])
+    
+    # Compare performance
+    for test_type in original_by_type.keys():
+        if test_type in optimized_by_type:
+            orig_avg = statistics.mean(original_by_type[test_type])
+            opt_avg = statistics.mean(optimized_by_type[test_type])
+            improvement = ((orig_avg - opt_avg) / orig_avg) * 100
+            
+            print(f"\n{test_type}:")
+            print(f"  Original Average: {orig_avg:.2f} seconds")
+            print(f"  Optimized Average: {opt_avg:.2f} seconds")
+            print(f"  Improvement: {improvement:.1f}%")
+            
+            if improvement > 0:
+                print(f"  ✅ Performance improved by {improvement:.1f}%")
+            else:
+                print(f"  ❌ Performance degraded by {abs(improvement):.1f}%")
+
+def generate_insights_report():
+    """Generate a comprehensive insights report"""
+    
+    report = {
+        'timestamp': datetime.now().isoformat(),
+        'recommendations': [],
+        'performance_metrics': {},
+        'optimization_results': {}
+    }
+    
+    # Add recommendations based on analysis
+    report['recommendations'].extend([
+        {
+            'category': 'Connection Optimization',
+            'recommendation': 'Enable SSH pipelining and connection multiplexing',
+            'impact': 'High',
+            'implementation': 'Update ansible.cfg with pipelining=True'
+        },
+        {
+            'category': 'Parallel Execution',
+            'recommendation': 'Use strategy: free for independent tasks',
+            'impact': 'Medium',
+            'implementation': 'Add strategy: free to playbook'
+        },
+        {
+            'category': 'Fact Gathering',
+            'recommendation': 'Disable fact gathering when not needed',
+            'impact': 'Medium',
+            'implementation': 'Set gather_facts: no in playbook'
+        },
+        {
+            'category': 'Resource Management',
+            'recommendation': 'Monitor system resources during execution',
+            'impact': 'High',
+            'implementation': 'Implement continuous monitoring'
+        }
+    ])
+    
+    # Save report
+    with open('/tmp/insights_report.json', 'w') as f:
+        json.dump(report, f, indent=2)
+    
+    print("\nInsights Report Generated:")
+    print("-" * 30)
+    for rec in report['recommendations']:
+        print(f"• {rec['category']}: {rec['recommendation']}")
+        print(f"  Impact: {rec['impact']}")
+        print(f"  Implementation: {rec['implementation']}\n")
+
+if __name__ == "__main__":
+    compare_performance()
+    generate_insights_report()
+EOF
+
+chmod +x compare_performance.py
+Run the comparison analysis:
+# Execute the comparison
+python3 compare_performance.py
+
+# View the generated insights report
+cat /tmp/insights_report.json | python3 -m json.tool
+Create a final optimization playbook that implements all best practices:
+# Create comprehensive optimized playbook
+cat > final-optimized-playbook.yml << 'EOF'
+---
+- name: Comprehensive Performance Optimized Playbook
+  hosts: all
+  gather_facts: smart  # Only gather facts when needed
+  strategy: free
+  vars:
+    ansible_ssh_pipelining: true
+    ansible_ssh_multiplexing: true
+    performance_test_enabled: true
+    
+  pre_tasks:
+    - name: Start performance monitoring
+      set_fact:
+        job_start_time: "{{ ansible_date_time.epoch }}"
+      when: performance_test_enabled
+      
+  tasks:
+    - name: Optimized system information gathering
+      setup:
+        filter: "ansible_processor*,ansible_memory*"
+      when: ansible_facts is not defined
+      
+    - name: Parallel file operations
+      copy:
+        content: |
+          Optimized content for {{ inventory_hostname }}
+          Generated at: {{ ansible_date_time.iso8601 }}
+          Job ID: {{ tower_job_id | default('manual') }}
+        dest: "/tmp/optimized_{{ inventory_hostname }}.txt"
+      register: file_creation
+      
+    - name: Batch verification
+      stat:
+        path: "/tmp/optimized_{{ inventory_hostname }}.txt"
+      register: file_verification
+      
+    - name: Performance calculation task
+      shell: |
+        python3 -c "
+        import time
+        start = time.time()
+        result = sum(i*i for i in range(10000))
+        print(f'Calculation result: {result}')
+        print(f'Execution time: {time.time() - start:.4f} seconds')
+        "
+      register: calc_result
+      
+  post_tasks:
+    - name: Record job completion metrics
+      lineinfile:
+        path: /tmp/final_performance_log.txt
+        line: "{{ ansible_date_time.iso8601 }},FINAL_OPTIMIZED,{{ ansible_date_time.epoch | int - job_start_time | int }},{{ inventory_hostname }},{{ tower_job_id | default('manual') }}"
+        create: yes
+      when: performance_test_enabled
+      
+    - name: Clean up temporary files
+      file:
+        path: "/tmp/optimized_{{ inventory_hostname }}.txt"
+        state: absent
+      ignore_errors: yes
+EOF
+Conclusion
+In this comprehensive lab, you have successfully:
+
+• Configured Red Hat Insights integration with Ansible Automation Platform to enable continuous performance monitoring and analysis of your automation jobs
+
+• Implemented comprehensive job monitoring by creating performance test playbooks that simulate different types of workloads (CPU-intensive, memory-intensive, and network-intensive tasks) and collecting detailed execution metrics
+
+• Analyzed performance data using both Red Hat Insights dashboard and custom Python scripts to identify bottlenecks, resource constraints, and optimization opportunities
+
+• Applied performance optimizations including SSH pipelining, connection multiplexing, parallel execution strategies, and selective fact gathering to improve job execution times
+
+• Measured optimization impact by comparing before and after performance metrics, demonstrating quantifiable improvements in automation job efficiency
+
+Why This Matters:
+
+Performance optimization of automation jobs is crucial for enterprise environments where:
+
+Scale matters: Large inventories and complex playbooks can take hours without optimization
+Resource efficiency: Optimized jobs consume fewer system resources, allowing more concurrent executions
+User experience: Faster job completion improves developer productivity and reduces waiting times
+Cost optimization: Efficient automation reduces compute costs in cloud environments
+Reliability: Well-optimized jobs are more predictable and less likely to fail due to timeouts
+Key Takeaways:
+
+Continuous monitoring is essential for maintaining optimal automation performance
+Data-driven optimization using tools like Insights provides actionable recommendations
+Connection optimization often provides the biggest performance gains
+Parallel execution strategies can significantly reduce overall job runtime
+Resource awareness helps prevent bottlenecks and system overload
+The skills you've developed in
