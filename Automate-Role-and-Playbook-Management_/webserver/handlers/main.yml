@@ -1,0 +1,21 @@
+---
+# handlers file for webserver
+- name: restart webserver
+  systemd:
+    name: "{{ webserver_service }}"
+    state: restarted
+  become: yes
+
+- name: restart firewall
+  systemd:
+    name: "{{ firewall_service }}"
+    state: restarted
+  become: yes
+
+- name: reload webserver
+  systemd:
+    name: "{{ webserver_service }}"
+    state: reloaded
+  become: yes
+---
+# handlers file for webserver

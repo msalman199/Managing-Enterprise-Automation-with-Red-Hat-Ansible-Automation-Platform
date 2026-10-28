@@ -1,0 +1,495 @@
+Lab 16: Automate Role and Playbook Management
+Objectives
+By the end of this lab, you will be able to:
+
+• Create and configure Ansible roles with proper directory structure and components • Implement roles within playbooks for modular automation • Test roles with different playbook configurations and variables • Understand best practices for role-based automation management • Apply role dependencies and conditional logic in complex scenarios
+
+Prerequisites
+Before starting this lab, you should have:
+
+• Basic understanding of YAML syntax and structure • Familiarity with Linux command line operations • Knowledge of Ansible fundamentals including playbooks, tasks, and variables • Understanding of SSH key-based authentication • Experience with text editors like vim or nano
+
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own VM or install software.
+
+Your lab environment includes: • Control Node: CentOS/RHEL 8 with Ansible installed • Managed Nodes: Two target systems (node1 and node2) • Pre-configured SSH connectivity between all nodes • All necessary tools and dependencies pre-installed
+
+Task 1: Create and Configure an Ansible Role
+Subtask 1.1: Initialize Role Directory Structure
+First, let's create a proper Ansible role structure using the ansible-galaxy command.
+
+Connect to your control node and navigate to your working directory:
+cd /home/student
+mkdir ansible-lab16
+cd ansible-lab16
+Create a new role called webserver using ansible-galaxy:
+ansible-galaxy init webserver
+Examine the created directory structure:
+tree webserver/
+You should see the following structure:
+
+webserver/
+├── README.md
+├── defaults/
+│   └── main.yml
+├── files/
+├── handlers/
+│   └── main.yml
+├── meta/
+│   └── main.yml
+├── tasks/
+│   └── main.yml
+├── templates/
+├── tests/
+│   ├── inventory
+│   └── test.yml
+└── vars/
+    └── main.yml
+Subtask 1.2: Configure Role Variables
+Edit the default variables for the webserver role:
+vim webserver/defaults/main.yml
+Add the following content:
+
+---
+# defaults file for webserver
+webserver_package: httpd
+webserver_service: httpd
+webserver_port: 80
+document_root: /var/www/html
+index_file: index.html
+server_admin: admin@example.com
+Create role-specific variables in the vars directory:
+vim webserver/vars/main.yml
+Add the following content:
+
+---
+# vars file for webserver
+firewall_service: firewalld
+required_packages:
+  - "{{ webserver_package }}"
+  - firewalld
+  - python3-firewall
+Subtask 1.3: Define Role Tasks
+Create the main tasks file for the webserver role:
+vim webserver/tasks/main.yml
+Add the following comprehensive task list:
+
+---
+# tasks file for webserver
+- name: Install required packages
+  yum:
+    name: "{{ required_packages }}"
+    state: present
+  become: yes
+
+- name: Start and enable firewall service
+  systemd:
+    name: "{{ firewall_service }}"
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Configure firewall for HTTP traffic
+  firewalld:
+    service: http
+    permanent: yes
+    state: enabled
+    immediate: yes
+  become: yes
+  notify: restart firewall
+
+- name: Create document root directory
+  file:
+    path: "{{ document_root }}"
+    state: directory
+    owner: apache
+    group: apache
+    mode: '0755'
+  become: yes
+
+- name: Deploy index.html from template
+  template:
+    src: index.html.j2
+    dest: "{{ document_root }}/{{ index_file }}"
+    owner: apache
+    group: apache
+    mode: '0644'
+  become: yes
+  notify: restart webserver
+
+- name: Start and enable webserver service
+  systemd:
+    name: "{{ webserver_service }}"
+    state: started
+    enabled: yes
+  become: yes
+Subtask 1.4: Create Templates and Handlers
+Create an HTML template for the web page:
+vim webserver/templates/index.html.j2
+Add the following template content:
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ ansible_hostname }} Web Server</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .header { background-color: #f4f4f4; padding: 20px; border-radius: 5px; }
+        .info { margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Welcome to {{ ansible_hostname }}</h1>
+        <p>Managed by Ansible Role: webserver</p>
+    </div>
+    <div class="info">
+        <h2>Server Information</h2>
+        <ul>
+            <li><strong>Hostname:</strong> {{ ansible_hostname }}</li>
+            <li><strong>IP Address:</strong> {{ ansible_default_ipv4.address }}</li>
+            <li><strong>Operating System:</strong> {{ ansible_distribution }} {{ ansible_distribution_version }}</li>
+            <li><strong>Web Server:</strong> {{ webserver_package }}</li>
+            <li><strong>Port:</strong> {{ webserver_port }}</li>
+            <li><strong>Administrator:</strong> {{ server_admin }}</li>
+        </ul>
+    </div>
+    <div class="info">
+        <p><em>This page was generated on {{ ansible_date_time.date }} at {{ ansible_date_time.time }}</em></p>
+    </div>
+</body>
+</html>
+Create handlers for service management:
+vim webserver/handlers/main.yml
+Add the following handlers:
+
+---
+# handlers file for webserver
+- name: restart webserver
+  systemd:
+    name: "{{ webserver_service }}"
+    state: restarted
+  become: yes
+
+- name: restart firewall
+  systemd:
+    name: "{{ firewall_service }}"
+    state: restarted
+  become: yes
+
+- name: reload webserver
+  systemd:
+    name: "{{ webserver_service }}"
+    state: reloaded
+  become: yes
+Subtask 1.5: Configure Role Metadata
+Edit the role metadata to define dependencies and information:
+vim webserver/meta/main.yml
+Update the content:
+
+galaxy_info:
+  author: Student Lab
+  description: A comprehensive webserver role for RHEL/CentOS systems
+  company: Al Nafi Education
+  license: MIT
+  min_ansible_version: 2.9
+  platforms:
+    - name: EL
+      versions:
+        - 7
+        - 8
+        - 9
+  galaxy_tags:
+    - webserver
+    - httpd
+    - apache
+
+dependencies: []
+Task 2: Use Roles in Playbooks
+Subtask 2.1: Create Basic Role-Based Playbook
+Create an inventory file for your managed nodes:
+vim inventory.ini
+Add your managed nodes:
+
+[webservers]
+node1 ansible_host=<node1_ip_address>
+node2 ansible_host=<node2_ip_address>
+
+[all:vars]
+ansible_user=student
+ansible_ssh_private_key_file=~/.ssh/id_rsa
+Create a basic playbook that uses the webserver role:
+vim deploy-webserver.yml
+Add the following playbook content:
+
+---
+- name: Deploy Web Servers using Role
+  hosts: webservers
+  become: yes
+  roles:
+    - webserver
+Run the playbook to test the basic role functionality:
+ansible-playbook -i inventory.ini deploy-webserver.yml
+Subtask 2.2: Create Advanced Role-Based Playbook with Variables
+Create a more complex playbook with role variables and multiple configurations:
+vim advanced-webserver.yml
+Add the following advanced playbook:
+
+---
+- name: Deploy Web Servers with Custom Configuration
+  hosts: webservers
+  become: yes
+  vars:
+    custom_server_admin: "lab-admin@alnafi.com"
+    custom_port: 8080
+  
+  pre_tasks:
+    - name: Update system packages
+      yum:
+        name: '*'
+        state: latest
+      when: ansible_os_family == "RedHat"
+
+  roles:
+    - role: webserver
+      vars:
+        server_admin: "{{ custom_server_admin }}"
+        webserver_port: "{{ custom_port }}"
+      tags: ['webserver', 'apache']
+
+  post_tasks:
+    - name: Verify web service is running
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:{{ custom_port }}"
+        method: GET
+        status_code: 200
+      delegate_to: localhost
+      ignore_errors: yes
+Subtask 2.3: Create Role-Based Playbook with Conditional Logic
+Create a conditional playbook that applies different configurations based on host groups:
+vim conditional-webserver.yml
+Add the following conditional playbook:
+
+---
+- name: Deploy Web Servers with Conditional Configuration
+  hosts: all
+  become: yes
+  vars:
+    development_config:
+      server_admin: "dev-admin@alnafi.com"
+      webserver_port: 8080
+      index_file: "dev-index.html"
+    
+    production_config:
+      server_admin: "prod-admin@alnafi.com"
+      webserver_port: 80
+      index_file: "index.html"
+
+  tasks:
+    - name: Apply webserver role for development environment
+      include_role:
+        name: webserver
+      vars:
+        server_admin: "{{ development_config.server_admin }}"
+        webserver_port: "{{ development_config.webserver_port }}"
+        index_file: "{{ development_config.index_file }}"
+      when: inventory_hostname == "node1"
+      tags: ['development']
+
+    - name: Apply webserver role for production environment
+      include_role:
+        name: webserver
+      vars:
+        server_admin: "{{ production_config.server_admin }}"
+        webserver_port: "{{ production_config.webserver_port }}"
+        index_file: "{{ production_config.index_file }}"
+      when: inventory_hostname == "node2"
+      tags: ['production']
+Task 3: Test Roles with Different Playbook Configurations
+Subtask 3.1: Test Basic Role Functionality
+Run the basic webserver playbook and verify output:
+ansible-playbook -i inventory.ini deploy-webserver.yml -v
+Verify the web service is running on both nodes:
+ansible webservers -i inventory.ini -m uri -a "url=http://{{ ansible_default_ipv4.address }} method=GET"
+Check the generated web pages by accessing them through curl:
+curl http://<node1_ip_address>
+curl http://<node2_ip_address>
+Subtask 3.2: Test Advanced Configuration
+Run the advanced playbook with custom variables:
+ansible-playbook -i inventory.ini advanced-webserver.yml --tags webserver
+Verify the custom configuration was applied:
+ansible webservers -i inventory.ini -m shell -a "systemctl status httpd"
+Test the custom port configuration:
+ansible webservers -i inventory.ini -m shell -a "netstat -tlnp | grep :8080"
+Subtask 3.3: Test Conditional Role Application
+Run the conditional playbook to apply different configurations:
+ansible-playbook -i inventory.ini conditional-webserver.yml
+Verify different configurations were applied to different hosts:
+# Check node1 (development)
+curl http://<node1_ip_address>:8080
+
+# Check node2 (production)
+curl http://<node2_ip_address>
+Use tags to run specific configurations:
+# Run only development configuration
+ansible-playbook -i inventory.ini conditional-webserver.yml --tags development
+
+# Run only production configuration
+ansible-playbook -i inventory.ini conditional-webserver.yml --tags production
+Subtask 3.4: Test Role with Different Variable Sources
+Create a group variables file for additional testing:
+mkdir group_vars
+vim group_vars/webservers.yml
+Add group-specific variables:
+
+---
+webserver_package: httpd
+webserver_service: httpd
+server_admin: "group-admin@alnafi.com"
+custom_message: "Configured via group variables"
+Create host-specific variables:
+mkdir host_vars
+vim host_vars/node1.yml
+Add host-specific variables for node1:
+
+---
+server_admin: "node1-admin@alnafi.com"
+webserver_port: 8081
+custom_message: "Node1 specific configuration"
+Create a test playbook to demonstrate variable precedence:
+vim test-variables.yml
+Add the following playbook:
+
+---
+- name: Test Variable Precedence with Roles
+  hosts: webservers
+  become: yes
+  vars:
+    playbook_admin: "playbook-admin@alnafi.com"
+  
+  tasks:
+    - name: Display variable sources
+      debug:
+        msg: |
+          Server Admin: {{ server_admin | default('not set') }}
+          Custom Message: {{ custom_message | default('not set') }}
+          Webserver Port: {{ webserver_port | default('80') }}
+    
+    - name: Apply webserver role with mixed variables
+      include_role:
+        name: webserver
+Run the variable precedence test:
+ansible-playbook -i inventory.ini test-variables.yml
+Subtask 3.5: Performance and Validation Testing
+Create a validation playbook to test role functionality:
+vim validate-webserver.yml
+Add comprehensive validation tasks:
+
+---
+- name: Validate Webserver Role Deployment
+  hosts: webservers
+  become: yes
+  
+  tasks:
+    - name: Check if httpd package is installed
+      yum:
+        list: httpd
+      register: httpd_package
+    
+    - name: Verify httpd service is running
+      systemd:
+        name: httpd
+      register: httpd_service
+    
+    - name: Check firewall configuration
+      firewalld:
+        service: http
+        state: enabled
+        permanent: yes
+      check_mode: yes
+      register: firewall_config
+    
+    - name: Test web server response
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}"
+        method: GET
+        status_code: 200
+      delegate_to: localhost
+      register: web_response
+    
+    - name: Display validation results
+      debug:
+        msg: |
+          Package Status: {{ 'Installed' if httpd_package.results else 'Not Installed' }}
+          Service Status: {{ httpd_service.status.ActiveState }}
+          Firewall Status: {{ 'Configured' if not firewall_config.changed else 'Not Configured' }}
+          Web Response: {{ 'Success' if web_response.status == 200 else 'Failed' }}
+Run the validation playbook:
+ansible-playbook -i inventory.ini validate-webserver.yml
+Create a performance test using Ansible's timing features:
+vim performance-test.yml
+Add performance testing tasks:
+
+---
+- name: Performance Test Role Deployment
+  hosts: webservers
+  become: yes
+  
+  tasks:
+    - name: Time role execution
+      block:
+        - name: Record start time
+          set_fact:
+            start_time: "{{ ansible_date_time.epoch }}"
+        
+        - name: Apply webserver role
+          include_role:
+            name: webserver
+        
+        - name: Record end time
+          set_fact:
+            end_time: "{{ ansible_date_time.epoch }}"
+        
+        - name: Calculate execution time
+          debug:
+            msg: "Role execution time: {{ (end_time | int) - (start_time | int) }} seconds"
+Run the performance test:
+ansible-playbook -i inventory.ini performance-test.yml
+Troubleshooting Common Issues
+Issue 1: Role Not Found Error
+If you encounter "role not found" errors:
+
+# Verify role directory structure
+ls -la webserver/
+
+# Check ansible.cfg for roles_path
+cat ansible.cfg
+
+# Ensure you're running playbooks from the correct directory
+pwd
+Issue 2: Template Rendering Issues
+If templates fail to render:
+
+# Check template syntax
+ansible-playbook --syntax-check -i inventory.ini deploy-webserver.yml
+
+# Test template rendering manually
+ansible webservers -i inventory.ini -m setup | grep ansible_hostname
+Issue 3: Handler Not Triggering
+If handlers don't execute:
+
+# Force handler execution
+ansible-playbook -i inventory.ini deploy-webserver.yml --force-handlers
+
+# Check handler syntax in handlers/main.yml
+ansible-playbook --syntax-check -i inventory.ini deploy-webserver.yml
+Conclusion
+In this comprehensive lab, you have successfully:
+
+• Created a complete Ansible role with proper directory structure, including tasks, handlers, templates, variables, and metadata • Implemented role-based automation using multiple playbook configurations and variable sources • Tested roles extensively with different scenarios including conditional logic, variable precedence, and performance validation • Applied best practices for role development including proper variable management, template usage, and handler implementation
+
+This lab demonstrates the power of Ansible roles in creating modular, reusable automation components that can be easily maintained and scaled across different environments. The role-based approach you've learned is essential for managing enterprise automation at scale, making your infrastructure code more organized, maintainable, and collaborative.
+
+Key takeaways from this lab include understanding how roles promote code reusability, how variable precedence works in complex scenarios, and how to properly test and validate role functionality. These skills are fundamental for the Managing Enterprise Automation with Red Hat Ansible Automation Platform certification and real-world automation projects.
+
+The techniques you've mastered here will enable you to build sophisticated automation solutions that can adapt to different environments while maintaining consistency and reliability across your infrastructure.

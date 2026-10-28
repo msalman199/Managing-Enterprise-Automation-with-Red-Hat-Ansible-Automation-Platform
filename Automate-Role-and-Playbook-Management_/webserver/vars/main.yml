@@ -1,0 +1,8 @@
+---
+# vars file for webserver
+firewall_service: firewalld
+required_packages:
+  - "{{ webserver_package }}"
+  - firewalld
+  - python3-firewall---
+# vars file for webserver

@@ -1,0 +1,6 @@
+---
+webserver_package: httpd
+webserver_service: httpd
+server_admin: "group-admin@alnafi.com"
+custom_message: "Configured via group variables"
+

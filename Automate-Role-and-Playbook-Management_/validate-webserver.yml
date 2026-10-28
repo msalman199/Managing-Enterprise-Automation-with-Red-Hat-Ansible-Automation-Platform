@@ -1,0 +1,39 @@
+---
+- name: Validate Webserver Role Deployment
+  hosts: webservers
+  become: yes
+  
+  tasks:
+    - name: Check if httpd package is installed
+      yum:
+        list: httpd
+      register: httpd_package
+    
+    - name: Verify httpd service is running
+      systemd:
+        name: httpd
+      register: httpd_service
+    
+    - name: Check firewall configuration
+      firewalld:
+        service: http
+        state: enabled
+        permanent: yes
+      check_mode: yes
+      register: firewall_config
+    
+    - name: Test web server response
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}"
+        method: GET
+        status_code: 200
+      delegate_to: localhost
+      register: web_response
+    
+    - name: Display validation results
+      debug:
+        msg: |
+          Package Status: {{ 'Installed' if httpd_package.results else 'Not Installed' }}
+          Service Status: {{ httpd_service.status.ActiveState }}
+          Firewall Status: {{ 'Configured' if not firewall_config.changed else 'Not Configured' }}
+          Web Response: {{ 'Success' if web_response.status == 200 else 'Failed' }}

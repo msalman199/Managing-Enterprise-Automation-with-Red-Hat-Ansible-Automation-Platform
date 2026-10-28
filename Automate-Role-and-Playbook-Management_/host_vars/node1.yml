@@ -1,0 +1,4 @@
+---
+server_admin: "node1-admin@alnafi.com"
+webserver_port: 8081
+custom_message: "Node1 specific configuration"

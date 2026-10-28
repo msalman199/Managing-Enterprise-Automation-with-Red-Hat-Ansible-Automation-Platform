@@ -1,0 +1,36 @@
+---
+- name: Deploy Web Servers with Conditional Configuration
+  hosts: all
+  become: yes
+  vars:
+    development_config:
+      server_admin: "dev-admin@alnafi.com"
+      webserver_port: 8080
+      index_file: "dev-index.html"
+    
+    production_config:
+      server_admin: "prod-admin@alnafi.com"
+      webserver_port: 80
+      index_file: "index.html"
+
+  tasks:
+    - name: Apply webserver role for development environment
+      include_role:
+        name: webserver
+      vars:
+        server_admin: "{{ development_config.server_admin }}"
+        webserver_port: "{{ development_config.webserver_port }}"
+        index_file: "{{ development_config.index_file }}"
+      when: inventory_hostname == "node1"
+      tags: ['development']
+
+    - name: Apply webserver role for production environment
+      include_role:
+        name: webserver
+      vars:
+        server_admin: "{{ production_config.server_admin }}"
+        webserver_port: "{{ production_config.webserver_port }}"
+        index_file: "{{ production_config.index_file }}"
+      when: inventory_hostname == "node2"
+      tags: ['production']
+

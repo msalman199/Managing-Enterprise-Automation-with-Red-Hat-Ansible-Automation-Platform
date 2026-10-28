@@ -1,0 +1,11 @@
+---
+# defaults file for webserver
+#
+# ---
+# defaults file for webserver
+webserver_package: httpd
+webserver_service: httpd
+webserver_port: 80
+document_root: /var/www/html
+index_file: index.html
+server_admin: admin@example.com

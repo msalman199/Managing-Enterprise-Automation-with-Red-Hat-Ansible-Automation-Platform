@@ -1,0 +1,30 @@
+---
+- name: Deploy Web Servers with Custom Configuration
+  hosts: webservers
+  become: yes
+  vars:
+    custom_server_admin: "lab-admin@alnafi.com"
+    custom_port: 8080
+  
+  pre_tasks:
+    - name: Update system packages
+      yum:
+        name: '*'
+        state: latest
+      when: ansible_os_family == "RedHat"
+
+  roles:
+    - role: webserver
+      vars:
+        server_admin: "{{ custom_server_admin }}"
+        webserver_port: "{{ custom_port }}"
+      tags: ['webserver', 'apache']
+
+  post_tasks:
+    - name: Verify web service is running
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:{{ custom_port }}"
+        method: GET
+        status_code: 200
+      delegate_to: localhost
+      ignore_errors: yes

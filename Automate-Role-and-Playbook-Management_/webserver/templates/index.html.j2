@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ ansible_hostname }} Web Server</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .header { background-color: #f4f4f4; padding: 20px; border-radius: 5px; }
+        .info { margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Welcome to {{ ansible_hostname }}</h1>
+        <p>Managed by Ansible Role: webserver</p>
+    </div>
+    <div class="info">
+        <h2>Server Information</h2>
+        <ul>
+            <li><strong>Hostname:</strong> {{ ansible_hostname }}</li>
+            <li><strong>IP Address:</strong> {{ ansible_default_ipv4.address }}</li>
+            <li><strong>Operating System:</strong> {{ ansible_distribution }} {{ ansible_distribution_version }}</li>
+            <li><strong>Web Server:</strong> {{ webserver_package }}</li>
+            <li><strong>Port:</strong> {{ webserver_port }}</li>
+            <li><strong>Administrator:</strong> {{ server_admin }}</li>
+        </ul>
+    </div>
+    <div class="info">
+        <p><em>This page was generated on {{ ansible_date_time.date }} at {{ ansible_date_time.time }}</em></p>
+    </div>
+</body>
+</html>

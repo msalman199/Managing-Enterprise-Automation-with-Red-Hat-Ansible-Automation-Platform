@@ -1,0 +1,50 @@
+---
+# tasks file for webserver
+- name: Install required packages
+  yum:
+    name: "{{ required_packages }}"
+    state: present
+  become: yes
+
+- name: Start and enable firewall service
+  systemd:
+    name: "{{ firewall_service }}"
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Configure firewall for HTTP traffic
+  firewalld:
+    service: http
+    permanent: yes
+    state: enabled
+    immediate: yes
+  become: yes
+  notify: restart firewall
+
+- name: Create document root directory
+  file:
+    path: "{{ document_root }}"
+    state: directory
+    owner: apache
+    group: apache
+    mode: '0755'
+  become: yes
+
+- name: Deploy index.html from template
+  template:
+    src: index.html.j2
+    dest: "{{ document_root }}/{{ index_file }}"
+    owner: apache
+    group: apache
+    mode: '0644'
+  become: yes
+  notify: restart webserver
+
+- name: Start and enable webserver service
+  systemd:
+    name: "{{ webserver_service }}"
+    state: started
+    enabled: yes
+  become: yes---
+# tasks file for webserver
