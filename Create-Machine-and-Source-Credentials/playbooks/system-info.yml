@@ -1,0 +1,29 @@
+---
+- name: Gather System Information
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Display hostname
+      debug:
+        msg: "Hostname: {{ ansible_hostname }}"
+    
+    - name: Display OS information
+      debug:
+        msg: "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+    
+    - name: Display memory information
+      debug:
+        msg: "Total Memory: {{ ansible_memtotal_mb }} MB"
+    
+    - name: Create test file
+      file:
+        path: /tmp/credential-test.txt
+        state: touch
+        mode: '0644'
+      become: yes
+    
+    - name: Write test content
+      lineinfile:
+        path: /tmp/credential-test.txt
+        line: "Credential test completed at {{ ansible_date_time.iso8601 }}"
+      become: yes

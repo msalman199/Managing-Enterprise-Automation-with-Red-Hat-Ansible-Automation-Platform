@@ -1,0 +1,385 @@
+Lab 15: Create Machine and Source Credentials
+Objectives
+By the end of this lab, students will be able to:
+
+Configure machine credentials for secure authentication to managed hosts
+Create and integrate source credentials with Git repositories
+Test credential functionality through automated job execution
+Understand the security implications of credential management in automation platforms
+Implement best practices for credential storage and usage
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux command line operations
+Familiarity with SSH key concepts and authentication
+Knowledge of Git version control system fundamentals
+Understanding of Ansible Automation Platform basics
+Experience with YAML syntax and Ansible playbook structure
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own VM or install additional software.
+
+Your lab environment includes:
+
+Ansible Automation Platform (AWX) pre-installed
+Multiple target hosts for testing
+Git repository access
+All necessary tools and dependencies
+Task 1: Create Machine Credentials for Secure Login
+Machine credentials allow Ansible Automation Platform to authenticate and connect to managed hosts securely. We'll create SSH-based credentials for system access.
+
+Subtask 1.1: Generate SSH Key Pair
+First, we'll create an SSH key pair that will be used for machine authentication.
+
+Access your control node terminal and generate a new SSH key pair:
+ssh-keygen -t rsa -b 4096 -C "ansible-automation" -f ~/.ssh/ansible_key
+Press Enter when prompted for a passphrase to create a key without a passphrase (for automation purposes):
+# Output should show:
+# Generating public/private rsa key pair.
+# Enter passphrase (empty for no passphrase): [Press Enter]
+# Enter same passphrase again: [Press Enter]
+# Your identification has been saved in /home/student/.ssh/ansible_key
+# Your public key has been saved in /home/student/.ssh/ansible_key.pub
+Verify the key creation:
+ls -la ~/.ssh/ansible_key*
+Display the private key content (we'll need this for credential creation):
+cat ~/.ssh/ansible_key
+Copy the private key content to your clipboard or notepad for later use.
+Subtask 1.2: Distribute Public Key to Target Hosts
+Copy the public key to target hosts (replace target-host-ip with actual IP addresses):
+ssh-copy-id -i ~/.ssh/ansible_key.pub student@target-host-ip
+Test SSH connection using the new key:
+ssh -i ~/.ssh/ansible_key student@target-host-ip
+Exit the SSH session:
+exit
+Subtask 1.3: Create Machine Credential in AWX
+Access AWX web interface by opening your browser and navigating to the AWX URL provided in your lab environment.
+
+Log in using the credentials provided in your lab environment.
+
+Navigate to Credentials:
+
+Click on Resources in the left sidebar
+Select Credentials
+Create new credential:
+
+Click the + (Add) button
+Fill in the following details:
+Name: Linux Machine Credential
+Description: SSH credential for Linux hosts
+Organization: Default
+Credential Type: Machine
+Configure credential details:
+
+Username: student
+SSH Private Key: Paste the private key content from Subtask 1.1
+Privilege Escalation Method: sudo
+Privilege Escalation Username: root
+Save the credential by clicking the Save button.
+
+Subtask 1.4: Create Inventory with Target Hosts
+Navigate to Inventories:
+
+Click on Resources in the left sidebar
+Select Inventories
+Create new inventory:
+
+Click the + (Add) button
+Select Add inventory
+Configure inventory:
+
+Name: Lab Hosts
+Description: Target hosts for credential testing
+Organization: Default
+Save the inventory.
+
+Add hosts to inventory:
+
+Click on the newly created inventory
+Click on Hosts tab
+Click the + (Add) button
+Add host details:
+Name: lab-host-1
+Description: First test host
+Variables:
+ansible_host: [TARGET_HOST_IP]
+ansible_user: student
+Save the host.
+Task 2: Integrate Source Credentials with Git Repositories
+Source credentials enable AWX to access private Git repositories containing playbooks and automation content.
+
+Subtask 2.1: Create Git Repository Access Token
+Access your Git provider (GitHub, GitLab, etc.) through the web interface.
+
+Navigate to Personal Access Tokens:
+
+For GitHub: Settings → Developer settings → Personal access tokens → Tokens (classic)
+For GitLab: User Settings → Access Tokens
+Generate new token:
+
+Token name: AWX-Automation-Access
+Expiration: Set appropriate expiration date
+Scopes/Permissions: Select repo (full repository access)
+Copy the generated token immediately (it won't be shown again).
+
+Subtask 2.2: Create Source Control Credential in AWX
+Return to AWX web interface.
+
+Navigate to Credentials:
+
+Click on Resources in the left sidebar
+Select Credentials
+Create new credential:
+
+Click the + (Add) button
+Configure the credential:
+Name: Git Repository Credential
+Description: Access token for Git repositories
+Organization: Default
+Credential Type: Source Control
+Configure authentication details:
+
+Username: Your Git username
+Password: Paste the access token from Subtask 2.1
+Save the credential.
+
+Subtask 2.3: Create Project with Source Control Integration
+Navigate to Projects:
+
+Click on Resources in the left sidebar
+Select Projects
+Create new project:
+
+Click the + (Add) button
+Configure project details:
+Name: Automation Playbooks
+Description: Project containing automation playbooks
+Organization: Default
+Source Control Type: Git
+Source Control URL: https://github.com/your-username/ansible-playbooks.git
+Source Control Branch/Tag/Commit: main
+Source Control Credential: Git Repository Credential
+Enable automatic updates:
+
+Check Update Revision on Launch
+Check Clean
+Save the project.
+
+Sync the project by clicking the sync button (circular arrow icon).
+
+Subtask 2.4: Create Sample Playbook Repository
+If you don't have an existing repository, create one with sample content:
+
+Create a new repository in your Git provider named ansible-playbooks.
+
+Clone the repository locally:
+
+git clone https://github.com/your-username/ansible-playbooks.git
+cd ansible-playbooks
+Create a simple test playbook:
+mkdir -p playbooks
+cat > playbooks/system-info.yml << 'EOF'
+---
+- name: Gather System Information
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Display hostname
+      debug:
+        msg: "Hostname: {{ ansible_hostname }}"
+    
+    - name: Display OS information
+      debug:
+        msg: "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+    
+    - name: Display memory information
+      debug:
+        msg: "Total Memory: {{ ansible_memtotal_mb }} MB"
+    
+    - name: Create test file
+      file:
+        path: /tmp/credential-test.txt
+        state: touch
+        mode: '0644'
+      become: yes
+    
+    - name: Write test content
+      lineinfile:
+        path: /tmp/credential-test.txt
+        line: "Credential test completed at {{ ansible_date_time.iso8601 }}"
+      become: yes
+EOF
+Commit and push the playbook:
+git add .
+git commit -m "Add system information playbook for credential testing"
+git push origin main
+Task 3: Test Both Credentials by Running Automated Jobs
+Now we'll create and execute job templates that utilize both machine and source credentials.
+
+Subtask 3.1: Create Job Template
+Navigate to Job Templates:
+
+Click on Resources in the left sidebar
+Select Templates
+Create new job template:
+
+Click the + (Add) button
+Select Add job template
+Configure job template:
+
+Name: System Information Job
+Description: Test job using machine and source credentials
+Job Type: Run
+Inventory: Lab Hosts
+Project: Automation Playbooks
+Playbook: playbooks/system-info.yml
+Credentials: Linux Machine Credential
+Configure additional options:
+
+Verbosity: 1 (Verbose)
+Enable Privilege Escalation: Checked
+Allow Simultaneous: Checked
+Save the template.
+
+Subtask 3.2: Execute Test Job
+Launch the job:
+
+Click on the System Information Job template
+Click the Launch button (rocket icon)
+Monitor job execution:
+
+Observe the job output in real-time
+Verify that the job connects successfully to target hosts
+Check that privilege escalation works correctly
+Verify successful execution:
+
+Job status should show Successful
+Output should display system information from target hosts
+Test file should be created on target systems
+Subtask 3.3: Verify Credential Functionality
+Check machine credential functionality:
+# SSH to target host and verify test file creation
+ssh -i ~/.ssh/ansible_key student@target-host-ip
+ls -la /tmp/credential-test.txt
+cat /tmp/credential-test.txt
+exit
+Verify source credential functionality:
+
+Navigate to Projects in AWX
+Click on Automation Playbooks project
+Verify Last Job Status shows Successful
+Check Revision shows latest commit hash
+Test credential updates:
+
+Make a change to your playbook in Git
+Sync the project in AWX
+Verify the changes are pulled successfully
+Subtask 3.4: Create Advanced Test Job
+Create a more complex playbook to test advanced credential features:
+cat > playbooks/credential-advanced-test.yml << 'EOF'
+---
+- name: Advanced Credential Test
+  hosts: all
+  gather_facts: yes
+  vars:
+    test_user: testuser
+    test_directory: /opt/credential-test
+  
+  tasks:
+    - name: Create test user (requires sudo)
+      user:
+        name: "{{ test_user }}"
+        state: present
+        shell: /bin/bash
+      become: yes
+    
+    - name: Create test directory
+      file:
+        path: "{{ test_directory }}"
+        state: directory
+        owner: "{{ test_user }}"
+        group: "{{ test_user }}"
+        mode: '0755'
+      become: yes
+    
+    - name: Install package (requires sudo)
+      package:
+        name: htop
+        state: present
+      become: yes
+    
+    - name: Generate system report
+      shell: |
+        echo "=== System Report ===" > {{ test_directory }}/system-report.txt
+        echo "Generated by: $(whoami)" >> {{ test_directory }}/system-report.txt
+        echo "Date: $(date)" >> {{ test_directory }}/system-report.txt
+        echo "Hostname: $(hostname)" >> {{ test_directory }}/system-report.txt
+        echo "Uptime: $(uptime)" >> {{ test_directory }}/system-report.txt
+      become: yes
+      become_user: "{{ test_user }}"
+    
+    - name: Display report content
+      slurp:
+        src: "{{ test_directory }}/system-report.txt"
+      register: report_content
+      become: yes
+    
+    - name: Show report
+      debug:
+        msg: "{{ report_content.content | b64decode }}"
+EOF
+Commit and push the new playbook:
+git add playbooks/credential-advanced-test.yml
+git commit -m "Add advanced credential test playbook"
+git push origin main
+Create new job template for advanced testing:
+
+Name: Advanced Credential Test
+Playbook: playbooks/credential-advanced-test.yml
+Use same inventory and credentials as before
+Execute the advanced test job and verify all tasks complete successfully.
+
+Troubleshooting Common Issues
+SSH Connection Issues
+If you encounter SSH connection problems:
+
+Verify SSH key permissions:
+chmod 600 ~/.ssh/ansible_key
+chmod 644 ~/.ssh/ansible_key.pub
+Test manual SSH connection:
+ssh -i ~/.ssh/ansible_key -v student@target-host-ip
+Check SSH agent:
+ssh-add ~/.ssh/ansible_key
+ssh-add -l
+Git Authentication Issues
+If Git synchronization fails:
+
+Verify token permissions in your Git provider
+Test token manually:
+git clone https://username:token@github.com/username/repository.git
+Check repository URL format in AWX project settings
+Privilege Escalation Issues
+If sudo operations fail:
+
+Verify sudo configuration on target hosts:
+sudo visudo
+# Ensure user has appropriate sudo privileges
+Test manual privilege escalation:
+ansible target-host-ip -i inventory -m shell -a "sudo whoami" --private-key ~/.ssh/ansible_key
+Conclusion
+In this lab, you have successfully:
+
+Created secure machine credentials using SSH key pairs for automated host access
+Configured source control credentials to integrate with Git repositories
+Implemented credential security best practices including proper key management and token usage
+Tested credential functionality through automated job execution
+Verified privilege escalation capabilities for administrative tasks
+Why This Matters: Proper credential management is crucial for enterprise automation security. Machine credentials enable secure, passwordless authentication to managed systems, while source credentials allow automated retrieval of playbooks and configurations from version control systems. This foundation enables scalable, secure automation across large infrastructure environments.
+
+Key Takeaways:
+
+SSH keys provide secure, automated authentication without password exposure
+Source control integration enables version-controlled automation content
+Proper credential separation follows security best practices
+Testing validates credential functionality before production deployment
+AWX credential management centralizes and secures authentication materials
+You now have the skills to implement secure credential management in Red Hat Ansible Automation Platform environments, supporting enterprise-scale automation initiatives.
