@@ -1,0 +1,787 @@
+Lab 11: Regular Maintenance of Ansible Platform
+Objectives
+By the end of this lab, students will be able to:
+
+Perform routine maintenance tasks to keep the Ansible Automation Platform secure and up-to-date
+Update Automation Controller and Hub components using best practices
+Monitor platform performance using built-in monitoring tools and metrics
+Schedule and automate regular maintenance tasks for optimal platform health
+Implement backup and recovery procedures for critical platform components
+Troubleshoot common maintenance-related issues
+Prerequisites
+Before starting this lab, students should have:
+
+Basic understanding of Linux system administration
+Familiarity with Ansible concepts and terminology
+Experience with command-line interface operations
+Knowledge of YAML syntax and file editing
+Understanding of systemd services and process management
+Basic networking concepts and troubleshooting skills
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own VM or install software.
+
+Your lab environment includes:
+
+CentOS/RHEL 8 or 9 based system
+Pre-installed Ansible Automation Platform components
+Automation Controller (AWX)
+Automation Hub (Pulp)
+PostgreSQL database
+Redis cache
+Nginx web server
+Task 1: Update Automation Controller and Hub
+Subtask 1.1: Prepare for Updates
+Before performing any updates, it's crucial to prepare the system and create backups.
+
+Connect to your lab environment and open a terminal session.
+
+Check current system status and running services:
+
+# Check system uptime and load
+uptime
+
+# Check available disk space
+df -h
+
+# Check memory usage
+free -h
+
+# List running Ansible services
+systemctl list-units --type=service | grep -E "(automation|awx|pulp)"
+Create a backup directory for storing configuration files:
+# Create backup directory with timestamp
+BACKUP_DIR="/opt/ansible-backup-$(date +%Y%m%d-%H%M%S)"
+sudo mkdir -p $BACKUP_DIR
+
+# Set proper permissions
+sudo chmod 755 $BACKUP_DIR
+echo "Backup directory created: $BACKUP_DIR"
+Backup critical configuration files:
+# Backup Automation Controller settings
+sudo cp -r /etc/tower/ $BACKUP_DIR/tower-config/
+
+# Backup database configuration
+sudo cp /etc/postgresql/*/main/postgresql.conf $BACKUP_DIR/
+sudo cp /etc/postgresql/*/main/pg_hba.conf $BACKUP_DIR/
+
+# Backup nginx configuration
+sudo cp -r /etc/nginx/ $BACKUP_DIR/nginx-config/
+
+# Create inventory of installed packages
+rpm -qa | grep -E "(ansible|awx|pulp)" > $BACKUP_DIR/installed-packages.txt
+Subtask 1.2: Update System Packages
+Update the base operating system packages:
+# Update package repositories
+sudo dnf update -y
+
+# Check for security updates specifically
+sudo dnf updateinfo list security
+
+# Install security updates
+sudo dnf update --security -y
+Verify system integrity after updates:
+# Check system logs for any errors
+sudo journalctl --since "10 minutes ago" --priority=err
+
+# Verify critical services are still running
+systemctl is-active postgresql nginx redis
+Subtask 1.3: Update Automation Controller Components
+Stop Automation Controller services in the correct order:
+# Create a service management script
+cat > /tmp/manage_services.sh << 'EOF'
+#!/bin/bash
+
+ACTION=$1
+SERVICES=("automation-controller-web" "automation-controller-task" "automation-controller-callback-receiver")
+
+case $ACTION in
+    "stop")
+        echo "Stopping Automation Controller services..."
+        for service in "${SERVICES[@]}"; do
+            echo "Stopping $service"
+            sudo systemctl stop $service
+            sleep 2
+        done
+        ;;
+    "start")
+        echo "Starting Automation Controller services..."
+        for service in "${SERVICES[@]}"; do
+            echo "Starting $service"
+            sudo systemctl start $service
+            sleep 5
+        done
+        ;;
+    "status")
+        echo "Checking service status..."
+        for service in "${SERVICES[@]}"; do
+            systemctl is-active $service
+        done
+        ;;
+esac
+EOF
+
+chmod +x /tmp/manage_services.sh
+
+# Stop services
+/tmp/manage_services.sh stop
+Update Automation Controller packages:
+# Check current version
+automation-controller-service --version
+
+# Update controller packages
+sudo dnf update automation-controller* -y
+
+# Update Python dependencies
+sudo /var/lib/awx/venv/awx/bin/pip install --upgrade pip
+sudo /var/lib/awx/venv/awx/bin/pip list --outdated
+Run database migrations if required:
+# Switch to awx user
+sudo -u awx bash
+
+# Run migrations
+cd /var/lib/awx
+source /var/lib/awx/venv/awx/bin/activate
+awx-manage migrate
+
+# Collect static files
+awx-manage collectstatic --noinput
+
+# Exit awx user session
+exit
+Start services and verify functionality:
+# Start services
+/tmp/manage_services.sh start
+
+# Check service status
+/tmp/manage_services.sh status
+
+# Verify web interface accessibility
+curl -k https://localhost/api/v2/ping/
+Subtask 1.4: Update Automation Hub Components
+Stop Automation Hub services:
+# Stop Pulp services
+sudo systemctl stop pulpcore-api
+sudo systemctl stop pulpcore-content
+sudo systemctl stop pulpcore-worker@*
+
+# Verify services are stopped
+systemctl is-active pulpcore-api pulpcore-content
+Update Hub packages:
+# Update Pulp packages
+sudo dnf update python3-pulp* -y
+
+# Update Hub-specific packages
+sudo dnf update automation-hub* -y
+
+# Check updated versions
+pip list | grep pulp
+Run Hub database migrations:
+# Switch to pulp user
+sudo -u pulp bash
+
+# Activate virtual environment
+source /var/lib/pulp/venv/bin/activate
+
+# Run migrations
+pulpcore-manager migrate
+
+# Exit pulp user session
+exit
+Restart Hub services:
+# Start Pulp services
+sudo systemctl start pulpcore-api
+sudo systemctl start pulpcore-content
+sudo systemctl start pulpcore-worker@1
+sudo systemctl start pulpcore-worker@2
+
+# Verify services are running
+systemctl is-active pulpcore-api pulpcore-content pulpcore-worker@1
+Task 2: Monitor Performance Using Built-in Tools
+Subtask 2.1: Set Up System Monitoring
+Install monitoring tools if not already present:
+# Install system monitoring utilities
+sudo dnf install -y htop iotop nethogs sysstat
+
+# Enable system statistics collection
+sudo systemctl enable sysstat
+sudo systemctl start sysstat
+Create a monitoring script for Ansible services:
+cat > /opt/ansible-monitor.sh << 'EOF'
+#!/bin/bash
+
+# Ansible Platform Monitoring Script
+LOG_FILE="/var/log/ansible-monitoring.log"
+DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
+echo "=== Ansible Platform Health Check - $DATE ===" >> $LOG_FILE
+
+# Check service status
+echo "Service Status:" >> $LOG_FILE
+systemctl is-active automation-controller-web >> $LOG_FILE 2>&1
+systemctl is-active automation-controller-task >> $LOG_FILE 2>&1
+systemctl is-active pulpcore-api >> $LOG_FILE 2>&1
+systemctl is-active postgresql >> $LOG_FILE 2>&1
+systemctl is-active nginx >> $LOG_FILE 2>&1
+systemctl is-active redis >> $LOG_FILE 2>&1
+
+# Check resource usage
+echo "Resource Usage:" >> $LOG_FILE
+echo "CPU Usage: $(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)" >> $LOG_FILE
+echo "Memory Usage: $(free | grep Mem | awk '{printf "%.2f%%", $3/$2 * 100.0}')" >> $LOG_FILE
+echo "Disk Usage: $(df -h / | awk 'NR==2{printf "%s", $5}')" >> $LOG_FILE
+
+# Check database connections
+echo "Database Connections:" >> $LOG_FILE
+sudo -u postgres psql -c "SELECT count(*) as active_connections FROM pg_stat_activity WHERE state = 'active';" >> $LOG_FILE 2>&1
+
+# Check API responsiveness
+echo "API Health:" >> $LOG_FILE
+curl -s -k https://localhost/api/v2/ping/ | grep -q "pong" && echo "Controller API: OK" >> $LOG_FILE || echo "Controller API: ERROR" >> $LOG_FILE
+
+echo "===========================================" >> $LOG_FILE
+echo "" >> $LOG_FILE
+EOF
+
+chmod +x /opt/ansible-monitor.sh
+Subtask 2.2: Monitor Database Performance
+Check PostgreSQL performance metrics:
+# Connect to PostgreSQL as postgres user
+sudo -u postgres psql
+
+# Run performance queries
+\c awx
+
+-- Check database size
+SELECT pg_size_pretty(pg_database_size('awx')) as database_size;
+
+-- Check table sizes
+SELECT schemaname,tablename,pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
+FROM pg_tables 
+WHERE schemaname = 'public' 
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC 
+LIMIT 10;
+
+-- Check active connections
+SELECT count(*) as active_connections FROM pg_stat_activity WHERE state = 'active';
+
+-- Check slow queries
+SELECT query, mean_time, calls, total_time 
+FROM pg_stat_statements 
+ORDER BY mean_time DESC 
+LIMIT 5;
+
+\q
+Create database monitoring script:
+cat > /opt/db-monitor.sh << 'EOF'
+#!/bin/bash
+
+DB_LOG="/var/log/ansible-db-monitoring.log"
+DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
+echo "=== Database Monitoring - $DATE ===" >> $DB_LOG
+
+# Database size
+echo "Database Size:" >> $DB_LOG
+sudo -u postgres psql -d awx -c "SELECT pg_size_pretty(pg_database_size('awx')) as database_size;" >> $DB_LOG
+
+# Connection count
+echo "Active Connections:" >> $DB_LOG
+sudo -u postgres psql -d awx -c "SELECT count(*) as active_connections FROM pg_stat_activity WHERE state = 'active';" >> $DB_LOG
+
+# Lock information
+echo "Database Locks:" >> $DB_LOG
+sudo -u postgres psql -d awx -c "SELECT mode, count(*) FROM pg_locks GROUP BY mode;" >> $DB_LOG
+
+echo "===========================================" >> $DB_LOG
+echo "" >> $DB_LOG
+EOF
+
+chmod +x /opt/db-monitor.sh
+Subtask 2.3: Monitor Application Performance
+Check Automation Controller metrics:
+# Check job execution statistics
+curl -k -u admin:password https://localhost/api/v2/jobs/ | jq '.results[] | {id: .id, status: .status, elapsed: .elapsed}'
+
+# Check system capacity
+curl -k -u admin:password https://localhost/api/v2/instances/ | jq '.results[] | {hostname: .hostname, capacity: .capacity, consumed_capacity: .consumed_capacity}'
+Monitor task queue status:
+# Check Redis queue status
+redis-cli info | grep -E "(connected_clients|used_memory_human|keyspace)"
+
+# Check Celery worker status
+sudo -u awx /var/lib/awx/venv/awx/bin/celery -A awx inspect active
+Create performance monitoring dashboard script:
+cat > /opt/performance-dashboard.sh << 'EOF'
+#!/bin/bash
+
+clear
+echo "=========================================="
+echo "    Ansible Platform Performance Dashboard"
+echo "=========================================="
+echo ""
+
+# System Resources
+echo "SYSTEM RESOURCES:"
+echo "CPU Usage: $(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)%"
+echo "Memory Usage: $(free | grep Mem | awk '{printf "%.1f%%", $3/$2 * 100.0}')"
+echo "Disk Usage: $(df -h / | awk 'NR==2{printf "%s", $5}')"
+echo ""
+
+# Service Status
+echo "SERVICE STATUS:"
+services=("automation-controller-web" "automation-controller-task" "pulpcore-api" "postgresql" "nginx" "redis")
+for service in "${services[@]}"; do
+    status=$(systemctl is-active $service)
+    printf "%-25s: %s\n" "$service" "$status"
+done
+echo ""
+
+# Database Info
+echo "DATABASE INFO:"
+db_size=$(sudo -u postgres psql -d awx -t -c "SELECT pg_size_pretty(pg_database_size('awx'));" | xargs)
+active_conn=$(sudo -u postgres psql -d awx -t -c "SELECT count(*) FROM pg_stat_activity WHERE state = 'active';" | xargs)
+echo "Database Size: $db_size"
+echo "Active Connections: $active_conn"
+echo ""
+
+# API Health
+echo "API HEALTH:"
+if curl -s -k https://localhost/api/v2/ping/ | grep -q "pong"; then
+    echo "Controller API: OK"
+else
+    echo "Controller API: ERROR"
+fi
+
+echo ""
+echo "Last updated: $(date)"
+echo "=========================================="
+EOF
+
+chmod +x /opt/performance-dashboard.sh
+Task 3: Schedule Regular Maintenance Tasks
+Subtask 3.1: Create Automated Backup Scripts
+Create comprehensive backup script:
+cat > /opt/ansible-backup.sh << 'EOF'
+#!/bin/bash
+
+# Ansible Platform Backup Script
+BACKUP_BASE="/opt/ansible-backups"
+DATE=$(date +%Y%m%d-%H%M%S)
+BACKUP_DIR="$BACKUP_BASE/backup-$DATE"
+LOG_FILE="/var/log/ansible-backup.log"
+
+# Create backup directory
+mkdir -p $BACKUP_DIR
+
+echo "$(date): Starting backup to $BACKUP_DIR" >> $LOG_FILE
+
+# Backup database
+echo "$(date): Backing up database..." >> $LOG_FILE
+sudo -u postgres pg_dump awx > $BACKUP_DIR/awx-database.sql
+if [ $? -eq 0 ]; then
+    echo "$(date): Database backup completed successfully" >> $LOG_FILE
+else
+    echo "$(date): Database backup failed" >> $LOG_FILE
+    exit 1
+fi
+
+# Backup configuration files
+echo "$(date): Backing up configuration files..." >> $LOG_FILE
+cp -r /etc/tower/ $BACKUP_DIR/tower-config/ 2>/dev/null
+cp -r /etc/nginx/ $BACKUP_DIR/nginx-config/ 2>/dev/null
+cp -r /etc/postgresql/ $BACKUP_DIR/postgresql-config/ 2>/dev/null
+
+# Backup custom playbooks and inventories
+if [ -d "/var/lib/awx/projects" ]; then
+    cp -r /var/lib/awx/projects/ $BACKUP_DIR/projects/ 2>/dev/null
+fi
+
+# Create backup manifest
+cat > $BACKUP_DIR/backup-manifest.txt << MANIFEST
+Backup Date: $(date)
+Backup Directory: $BACKUP_DIR
+Contents:
+- AWX Database (awx-database.sql)
+- Tower Configuration (/etc/tower/)
+- Nginx Configuration (/etc/nginx/)
+- PostgreSQL Configuration (/etc/postgresql/)
+- Custom Projects (/var/lib/awx/projects/)
+
+Backup Size: $(du -sh $BACKUP_DIR | cut -f1)
+MANIFEST
+
+# Compress backup
+echo "$(date): Compressing backup..." >> $LOG_FILE
+cd $BACKUP_BASE
+tar -czf backup-$DATE.tar.gz backup-$DATE/
+rm -rf backup-$DATE/
+
+# Clean old backups (keep last 7 days)
+find $BACKUP_BASE -name "backup-*.tar.gz" -mtime +7 -delete
+
+echo "$(date): Backup completed successfully" >> $LOG_FILE
+echo "Backup file: $BACKUP_BASE/backup-$DATE.tar.gz"
+EOF
+
+chmod +x /opt/ansible-backup.sh
+Create database maintenance script:
+cat > /opt/db-maintenance.sh << 'EOF'
+#!/bin/bash
+
+# Database Maintenance Script
+LOG_FILE="/var/log/ansible-db-maintenance.log"
+
+echo "$(date): Starting database maintenance..." >> $LOG_FILE
+
+# Vacuum and analyze database
+sudo -u postgres psql -d awx -c "VACUUM ANALYZE;" >> $LOG_FILE 2>&1
+
+# Update table statistics
+sudo -u postgres psql -d awx -c "ANALYZE;" >> $LOG_FILE 2>&1
+
+# Check for database bloat
+sudo -u postgres psql -d awx -c "
+SELECT schemaname, tablename, 
+       pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size,
+       pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) as table_size
+FROM pg_tables 
+WHERE schemaname = 'public' 
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC 
+LIMIT 10;" >> $LOG_FILE 2>&1
+
+# Reindex if necessary
+sudo -u postgres psql -d awx -c "REINDEX DATABASE awx;" >> $LOG_FILE 2>&1
+
+echo "$(date): Database maintenance completed" >> $LOG_FILE
+EOF
+
+chmod +x /opt/db-maintenance.sh
+Subtask 3.2: Set Up Log Rotation and Cleanup
+Configure log rotation for Ansible logs:
+cat > /etc/logrotate.d/ansible-platform << 'EOF'
+/var/log/tower/*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+    postrotate
+        systemctl reload automation-controller-web > /dev/null 2>&1 || true
+    endscript
+}
+
+/var/log/ansible-*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+}
+
+/var/log/pulp/*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+    postrotate
+        systemctl reload pulpcore-api > /dev/null 2>&1 || true
+    endscript
+}
+EOF
+Create cleanup script for temporary files:
+cat > /opt/cleanup-temp.sh << 'EOF'
+#!/bin/bash
+
+# Cleanup temporary files and old logs
+LOG_FILE="/var/log/ansible-cleanup.log"
+
+echo "$(date): Starting cleanup process..." >> $LOG_FILE
+
+# Clean temporary files
+find /tmp -name "ansible-*" -mtime +1 -delete 2>/dev/null
+find /var/tmp -name "*.tmp" -mtime +7 -delete 2>/dev/null
+
+# Clean old job artifacts (older than 30 days)
+find /var/lib/awx/job_status -name "*.json" -mtime +30 -delete 2>/dev/null
+
+# Clean Redis cache if it gets too large
+redis_memory=$(redis-cli info memory | grep used_memory_human | cut -d: -f2 | tr -d '\r')
+echo "$(date): Redis memory usage: $redis_memory" >> $LOG_FILE
+
+# Clean old backup files (keep last 30 days)
+find /opt/ansible-backups -name "backup-*.tar.gz" -mtime +30 -delete 2>/dev/null
+
+# Clean package cache
+dnf clean all > /dev/null 2>&1
+
+echo "$(date): Cleanup process completed" >> $LOG_FILE
+EOF
+
+chmod +x /opt/cleanup-temp.sh
+Subtask 3.3: Configure Cron Jobs for Automated Maintenance
+Set up cron jobs for regular maintenance:
+# Create cron jobs for root user
+cat > /tmp/ansible-cron << 'EOF'
+# Ansible Platform Maintenance Cron Jobs
+
+# Daily backup at 2 AM
+0 2 * * * /opt/ansible-backup.sh
+
+# Database maintenance every Sunday at 3 AM
+0 3 * * 0 /opt/db-maintenance.sh
+
+# System monitoring every 15 minutes
+*/15 * * * * /opt/ansible-monitor.sh
+
+# Database monitoring every 30 minutes
+*/30 * * * * /opt/db-monitor.sh
+
+# Cleanup temporary files daily at 4 AM
+0 4 * * * /opt/cleanup-temp.sh
+
+# Check disk space every hour
+0 * * * * df -h | awk '$5 > 80 {print "Disk space warning: " $0}' | mail -s "Disk Space Alert" admin@localhost
+EOF
+
+# Install cron jobs
+sudo crontab /tmp/ansible-cron
+rm /tmp/ansible-cron
+
+# Verify cron jobs are installed
+echo "Installed cron jobs:"
+sudo crontab -l
+Create maintenance status dashboard:
+cat > /opt/maintenance-status.sh << 'EOF'
+#!/bin/bash
+
+echo "=========================================="
+echo "    Ansible Platform Maintenance Status"
+echo "=========================================="
+echo ""
+
+# Last backup status
+echo "BACKUP STATUS:"
+if [ -f "/var/log/ansible-backup.log" ]; then
+    last_backup=$(tail -1 /var/log/ansible-backup.log)
+    echo "Last backup: $last_backup"
+    
+    # Check if backup was successful
+    if echo "$last_backup" | grep -q "completed successfully"; then
+        echo "Status: SUCCESS"
+    else
+        echo "Status: FAILED"
+    fi
+else
+    echo "No backup log found"
+fi
+echo ""
+
+# Database maintenance status
+echo "DATABASE MAINTENANCE:"
+if [ -f "/var/log/ansible-db-maintenance.log" ]; then
+    last_maintenance=$(tail -1 /var/log/ansible-db-maintenance.log)
+    echo "Last maintenance: $last_maintenance"
+else
+    echo "No maintenance log found"
+fi
+echo ""
+
+# Disk space status
+echo "DISK SPACE:"
+df -h | grep -E "(Filesystem|/dev/)" | head -2
+echo ""
+
+# Service uptime
+echo "SERVICE UPTIME:"
+systemctl show automation-controller-web --property=ActiveEnterTimestamp | cut -d= -f2
+echo ""
+
+# Cron job status
+echo "SCHEDULED JOBS:"
+echo "Next backup: $(date -d 'tomorrow 2:00')"
+echo "Next DB maintenance: $(date -d 'next Sunday 3:00')"
+echo ""
+
+echo "=========================================="
+EOF
+
+chmod +x /opt/maintenance-status.sh
+Subtask 3.4: Set Up Health Checks and Alerts
+Create comprehensive health check script:
+cat > /opt/health-check.sh << 'EOF'
+#!/bin/bash
+
+# Comprehensive Health Check Script
+ALERT_EMAIL="admin@localhost"
+LOG_FILE="/var/log/ansible-health-check.log"
+ALERT_LOG="/var/log/ansible-alerts.log"
+
+# Function to send alert
+send_alert() {
+    local message="$1"
+    echo "$(date): ALERT - $message" >> $ALERT_LOG
+    echo "$message" | mail -s "Ansible Platform Alert" $ALERT_EMAIL 2>/dev/null
+}
+
+# Function to log status
+log_status() {
+    local message="$1"
+    echo "$(date): $message" >> $LOG_FILE
+}
+
+log_status "Starting health check..."
+
+# Check critical services
+critical_services=("automation-controller-web" "automation-controller-task" "postgresql" "nginx" "redis")
+for service in "${critical_services[@]}"; do
+    if ! systemctl is-active --quiet $service; then
+        send_alert "Critical service $service is not running"
+        log_status "CRITICAL: $service is down"
+    else
+        log_status "OK: $service is running"
+    fi
+done
+
+# Check disk space
+disk_usage=$(df / | awk 'NR==2{print $5}' | sed 's/%//')
+if [ $disk_usage -gt 85 ]; then
+    send_alert "Disk space critical: ${disk_usage}% used"
+    log_status "CRITICAL: Disk space at ${disk_usage}%"
+else
+    log_status "OK: Disk space at ${disk_usage}%"
+fi
+
+# Check memory usage
+memory_usage=$(free | grep Mem | awk '{printf "%.0f", $3/$2 * 100.0}')
+if [ $memory_usage -gt 90 ]; then
+    send_alert "Memory usage critical: ${memory_usage}% used"
+    log_status "CRITICAL: Memory usage at ${memory_usage}%"
+else
+    log_status "OK: Memory usage at ${memory_usage}%"
+fi
+
+# Check database connectivity
+if ! sudo -u postgres psql -d awx -c "SELECT 1;" > /dev/null 2>&1; then
+    send_alert "Database connectivity failed"
+    log_status "CRITICAL: Cannot connect to database"
+else
+    log_status "OK: Database connectivity verified"
+fi
+
+# Check API responsiveness
+if ! curl -s -k https://localhost/api/v2/ping/ | grep -q "pong"; then
+    send_alert "Controller API is not responding"
+    log_status "CRITICAL: Controller API not responding"
+else
+    log_status "OK: Controller API responding"
+fi
+
+# Check certificate expiration (if using HTTPS)
+cert_days=$(echo | openssl s_client -servername localhost -connect localhost:443 2>/dev/null | openssl x509 -noout -dates | grep notAfter | cut -d= -f2 | xargs -I {} date -d {} +%s)
+current_time=$(date +%s)
+days_until_expiry=$(( (cert_days - current_time) / 86400 ))
+
+if [ $days_until_expiry -lt 30 ]; then
+    send_alert "SSL certificate expires in $days_until_expiry days"
+    log_status "WARNING: SSL certificate expires in $days_until_expiry days"
+else
+    log_status "OK: SSL certificate valid for $days_until_expiry days"
+fi
+
+log_status "Health check completed"
+EOF
+
+chmod +x /opt/health-check.sh
+Add health check to cron:
+# Add health check to existing cron jobs
+(sudo crontab -l; echo "*/5 * * * * /opt/health-check.sh") | sudo crontab -
+
+# Verify updated cron jobs
+echo "Updated cron jobs:"
+sudo crontab -l
+Troubleshooting Common Issues
+Issue 1: Services Fail to Start After Update
+Symptoms: Services show failed status after package updates
+
+Solution:
+
+# Check service logs
+sudo journalctl -u automation-controller-web -n 50
+
+# Reset failed services
+sudo systemctl reset-failed
+
+# Check configuration syntax
+sudo nginx -t
+sudo -u awx /var/lib/awx/venv/awx/bin/awx-manage check
+
+# Restart services in correct order
+sudo systemctl restart postgresql
+sudo systemctl restart redis
+sudo systemctl restart nginx
+sudo systemctl restart automation-controller-web
+Issue 2: Database Connection Issues
+Symptoms: Applications cannot connect to PostgreSQL
+
+Solution:
+
+# Check PostgreSQL status
+sudo systemctl status postgresql
+
+# Check database logs
+sudo tail -f /var/log/postgresql/postgresql-*.log
+
+# Test database connectivity
+sudo -u postgres psql -c "SELECT version();"
+
+# Check connection limits
+sudo -u postgres psql -c "SHOW max_connections;"
+sudo -u postgres psql -c "SELECT count(*) FROM pg_stat_activity;"
+Issue 3: High Memory Usage
+Symptoms: System becomes slow, high memory consumption
+
+Solution:
+
+# Identify memory-consuming processes
+ps aux --sort=-%mem | head -10
+
+# Check for memory leaks in Ansible processes
+sudo systemctl restart automation-controller-task
+
+# Clear Redis cache if necessary
+redis-cli FLUSHALL
+
+# Restart services to free memory
+sudo systemctl restart automation-controller-web
+Conclusion
+In this lab, you have successfully learned how to perform comprehensive maintenance tasks for the Ansible Automation Platform. You have accomplished the following key objectives:
+
+What You Accomplished:
+
+Platform Updates: You learned how to safely update both Automation Controller and Hub components, including proper service shutdown procedures, package updates, database migrations, and service restart verification.
+
+Performance Monitoring: You implemented comprehensive monitoring solutions using built-in tools and custom scripts to track system resources, database performance, service health, and API responsiveness.
+
+Automated Maintenance: You created and scheduled automated maintenance tasks including regular backups, database maintenance, log rotation, cleanup procedures, and health checks.
+
+Proactive Management: You established alerting mechanisms and monitoring dashboards to identify and address issues before they impact platform availability.
+
+Why This Matters:
+
+Regular maintenance of your Ansible Automation Platform is crucial for:
+
+Security: Keeping systems updated with the latest security patches
+Performance: Maintaining optimal system performance through regular cleanup and optimization
+Reliability: Preventing system failures through proactive monitoring and maintenance
+Compliance: Meeting organizational requirements for system maintenance and backup procedures
+Business Continuity: Ensuring platform availability for critical automation workflows
+The maintenance procedures you've implemented will help ensure your Ansible Automation Platform remains secure, performant, and reliable in production environments. These practices are essential for any organization relying on automation for critical business processes.
+
+Remember to regularly review and update your maintenance procedures as your platform grows and evolves, and always test maintenance procedures in non-production environments before applying them to production systems.
