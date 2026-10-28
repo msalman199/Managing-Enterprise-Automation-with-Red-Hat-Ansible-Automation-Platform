@@ -1,0 +1,34 @@
+---
+- name: Verify Automation Controller API connectivity
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars_files:
+    - ../group_vars/all.yml
+
+  tasks:
+    - name: Confirm required variables are set
+      assert:
+        that:
+          - controller_host | length > 0
+          - controller_username | length > 0
+          - controller_password | length > 0
+        fail_msg: "CONTROLLER_HOST, CONTROLLER_USER, and CONTROLLER_PASSWORD must be exported before running this playbook"
+
+    - name: Ping the Controller API
+      uri:
+        url: "{{ controller_host }}/api/v2/ping/"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: yes
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: ping_result
+
+    - name: Display Controller version information
+      debug:
+        msg:
+          - "Controller reachable: {{ controller_host }}"
+          - "Reported version: {{ ping_result.json.version }}"
+          - "Active node: {{ ping_result.json.active_node }}"

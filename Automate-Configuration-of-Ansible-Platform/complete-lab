@@ -1,0 +1,436 @@
+Lab 10: Automate Configuration of Ansible Automation Platform
+Objectives
+By the end of this lab, you will be able to:
+
+Use Ansible playbooks to automate the configuration of Ansible Automation Platform components
+Configure Automation Controller settings using Infrastructure as Code principles via the Controller API
+Automate the setup of execution environments and organizational structures in Automation Controller
+Integrate an external Git repository as a Controller project using API-driven automation
+Create a reusable maintenance playbook for platform housekeeping tasks
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Ansible playbooks and YAML syntax
+Familiarity with Linux command line operations
+Knowledge of REST APIs and HTTP methods (GET, POST, authentication headers)
+Understanding of Git version control concepts
+Basic networking concepts (ports, firewalls, DNS)
+Required Knowledge Areas
+Ansible Fundamentals: variables, tasks, handlers, and modules
+YAML Structure: proper indentation and syntax
+API Concepts: authentication, endpoints, and HTTP status codes
+Software Requirements
+This lab assumes you already have access to a running Ansible Automation Controller instance (for example, a lab-provided instance or a local trial installation) reachable over HTTPS, along with a control node from which to run Ansible. On the control node, install the required tooling:
+
+# Verify Ansible is installed; install if missing
+ansible --version || sudo dnf install -y ansible-core
+
+# Install the Python requests library used by the uri module for JSON handling
+pip3 install --user requests
+
+# Install the community.general collection (provides useful modules used below)
+ansible-galaxy collection install community.general
+Set the following environment variables in your shell before starting, replacing the values with your actual Controller connection details:
+
+export CONTROLLER_HOST="https://controller.lab.local"
+export CONTROLLER_USER="admin"
+export CONTROLLER_PASSWORD="your-admin-password"
+Lab Environment Setup
+Good News! Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment. No need to build your own virtual machines or install software from scratch.
+
+Your Lab Environment Includes
+Control Node: a Linux system with Ansible Core installed, used to run all playbooks in this lab
+Automation Controller Node: a reachable Automation Controller instance with a valid admin account
+All nodes are networked and accessible via SSH with pre-configured key authentication. This lab treats the Controller as a system to configure entirely through its REST API using Ansible's uri module, which is the supported, non-destructive way to automate Controller setup without touching its internal filesystem or services directly.
+
+Task 1: Prepare the Automation Project and Validate Connectivity
+Subtask 1.1: Create the Project Structure
+Connect to your control node and set up a working directory:
+
+ssh ansible-control
+
+mkdir -p ~/automation-platform-config/{playbooks,templates,group_vars}
+cd ~/automation-platform-config
+Create a variables file that stores your Controller connection details (do not commit real passwords to version control in a real environment; this is a lab-only convenience):
+
+cat > group_vars/all.yml << 'EOF'
+---
+controller_host: "{{ lookup('env', 'CONTROLLER_HOST') }}"
+controller_username: "{{ lookup('env', 'CONTROLLER_USER') }}"
+controller_password: "{{ lookup('env', 'CONTROLLER_PASSWORD') }}"
+controller_validate_certs: false
+lab_organization_name: "Lab Organization"
+lab_project_name: "ansible-examples"
+lab_project_git_url: "https://github.com/ansible/ansible-examples.git"
+lab_project_git_branch: "master"
+EOF
+Subtask 1.2: Verify API Connectivity
+Create a small playbook to confirm you can reach the Controller API and authenticate successfully:
+
+cat > playbooks/00-verify-connectivity.yml << 'EOF'
+---
+- name: Verify Automation Controller API connectivity
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars_files:
+    - ../group_vars/all.yml
+
+  tasks:
+    - name: Confirm required variables are set
+      assert:
+        that:
+          - controller_host | length > 0
+          - controller_username | length > 0
+          - controller_password | length > 0
+        fail_msg: "CONTROLLER_HOST, CONTROLLER_USER, and CONTROLLER_PASSWORD must be exported before running this playbook"
+
+    - name: Ping the Controller API
+      uri:
+        url: "{{ controller_host }}/api/v2/ping/"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: yes
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: ping_result
+
+    - name: Display Controller version information
+      debug:
+        msg:
+          - "Controller reachable: {{ controller_host }}"
+          - "Reported version: {{ ping_result.json.version }}"
+          - "Active node: {{ ping_result.json.active_node }}"
+EOF
+Run it:
+
+ansible-playbook playbooks/00-verify-connectivity.yml
+Deliverable: The playbook completes with ok=3 changed=0 failed=0 and the debug output shows a version string from ping_result.json.version and a non-empty active_node. If the play fails at the assert step, re-export your environment variables; if it fails at the ping step, verify network connectivity and credentials to the Controller.
+
+Task 2: Automate Organization, Credential, and Project Creation
+Subtask 2.1: Create the Organization and Team Structure
+Create a playbook that defines a lab organization using the Controller API. This uses POST with status_code: [201, 400] because a 400 response indicates the object already exists (Controller enforces unique names), which we treat as an acceptable, idempotent outcome for this lab.
+
+cat > playbooks/01-configure-organization.yml << 'EOF'
+---
+- name: Configure organization structure in Automation Controller
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars_files:
+    - ../group_vars/all.yml
+
+  tasks:
+    - name: Authenticate and obtain an OAuth2 token
+      uri:
+        url: "{{ controller_host }}/api/v2/tokens/"
+        method: POST
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: yes
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          description: "Lab 10 automation token"
+          scope: "write"
+        status_code: 201
+      register: token_result
+
+    - name: Set authentication header fact for subsequent requests
+      set_fact:
+        auth_header:
+          Authorization: "Bearer {{ token_result.json.token }}"
+
+    - name: Create the lab organization
+      uri:
+        url: "{{ controller_host }}/api/v2/organizations/"
+        method: POST
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          name: "{{ lab_organization_name }}"
+          description: "Organization created for Lab 10 automation exercises"
+        status_code: [201, 400]
+      register: org_create_result
+
+    - name: Look up the organization ID (handles both create and already-exists cases)
+      uri:
+        url: "{{ controller_host }}/api/v2/organizations/?name={{ lab_organization_name | urlencode }}"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: org_lookup_result
+
+    - name: Store the organization ID as a fact
+      set_fact:
+        lab_organization_id: "{{ org_lookup_result.json.results[0].id }}"
+
+    - name: Display organization details
+      debug:
+        msg:
+          - "Organization name: {{ lab_organization_name }}"
+          - "Organization ID: {{ lab_organization_id }}"
+EOF
+Run it:
+
+ansible-playbook playbooks/01-configure-organization.yml
+Deliverable: The debug task prints a numeric Organization ID. Running the playbook a second time still succeeds (idempotent), since the create step returns 400 on the second run but the lookup step always resolves the ID.
+
+Subtask 2.2: Create a Project Linked to an External Git Repository
+Extend the automation to register the ansible-examples public Git repository as a Controller Project. This demonstrates external repository integration using only the API.
+
+cat > playbooks/02-configure-project.yml << 'EOF'
+---
+- name: Integrate external Git repository as a Controller project
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars_files:
+    - ../group_vars/all.yml
+
+  tasks:
+    - name: Authenticate and obtain an OAuth2 token
+      uri:
+        url: "{{ controller_host }}/api/v2/tokens/"
+        method: POST
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: yes
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          description: "Lab 10 project automation token"
+          scope: "write"
+        status_code: 201
+      register: token_result
+
+    - name: Set authentication header fact
+      set_fact:
+        auth_header:
+          Authorization: "Bearer {{ token_result.json.token }}"
+
+    - name: Look up the organization ID
+      uri:
+        url: "{{ controller_host }}/api/v2/organizations/?name={{ lab_organization_name | urlencode }}"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: org_lookup_result
+
+    - name: Fail with a clear message if the organization does not exist yet
+      assert:
+        that:
+          - org_lookup_result.json.count > 0
+        fail_msg: "Organization '{{ lab_organization_name }}' not found. Run 01-configure-organization.yml first."
+
+    - name: Store the organization ID as a fact
+      set_fact:
+        lab_organization_id: "{{ org_lookup_result.json.results[0].id }}"
+
+    - name: Create the project from the external Git repository
+      uri:
+        url: "{{ controller_host }}/api/v2/projects/"
+        method: POST
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          name: "{{ lab_project_name }}"
+          description: "Project synced from an external Git repository for Lab 10"
+          organization: "{{ lab_organization_id }}"
+          scm_type: "git"
+          scm_url: "{{ lab_project_git_url }}"
+          scm_branch: "{{ lab_project_git_branch }}"
+          scm_update_on_launch: true
+        status_code: [201, 400]
+      register: project_create_result
+
+    - name: Look up the project ID
+      uri:
+        url: "{{ controller_host }}/api/v2/projects/?name={{ lab_project_name | urlencode }}"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: project_lookup_result
+
+    - name: Store the project ID as a fact
+      set_fact:
+        lab_project_id: "{{ project_lookup_result.json.results[0].id }}"
+
+    - name: Trigger a project sync from the Git repository
+      uri:
+        url: "{{ controller_host }}/api/v2/projects/{{ lab_project_id }}/update/"
+        method: POST
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [202, 405]
+      register: project_sync_result
+
+    - name: Wait for the project sync to complete
+      uri:
+        url: "{{ controller_host }}/api/v2/projects/{{ lab_project_id }}/"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: project_status_result
+      until: project_status_result.json.status in ['successful', 'failed', 'canceled']
+      retries: 20
+      delay: 5
+
+    - name: Display project sync outcome
+      debug:
+        msg:
+          - "Project name: {{ lab_project_name }}"
+          - "Project ID: {{ lab_project_id }}"
+          - "Sync status: {{ project_status_result.json.status }}"
+EOF
+Run it:
+
+ansible-playbook playbooks/02-configure-project.yml
+Deliverable: The final debug output shows Sync status: successful. You can confirm this independently by logging into the Controller web UI, navigating to Projects, and seeing ansible-examples listed with a green (successful) last sync indicator.
+
+Task 3: Automate Recurring Platform Maintenance Checks
+Subtask 3.1: Create a Maintenance Check Playbook
+Rather than modifying the Controller's internal files directly (which is unsupported and can break the platform), this task automates routine health checks through the API and produces a maintenance report. This mirrors real-world practice, where day-2 operations on Automation Controller are performed through its API and command-line utilities, not by hand-editing service internals.
+
+cat > playbooks/03-maintenance-check.yml << 'EOF'
+---
+- name: Perform Automation Controller maintenance health checks
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars_files:
+    - ../group_vars/all.yml
+  vars:
+    report_dir: "{{ playbook_dir }}/../reports"
+
+  tasks:
+    - name: Ensure the reports directory exists
+      file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Authenticate and obtain an OAuth2 token
+      uri:
+        url: "{{ controller_host }}/api/v2/tokens/"
+        method: POST
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: yes
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          description: "Lab 10 maintenance token"
+          scope: "write"
+        status_code: 201
+      register: token_result
+
+    - name: Set authentication header fact
+      set_fact:
+        auth_header:
+          Authorization: "Bearer {{ token_result.json.token }}"
+
+    - name: Query overall Controller health via the ping endpoint
+      uri:
+        url: "{{ controller_host }}/api/v2/ping/"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: health_check
+
+    - name: Query recent job status summary
+      uri:
+        url: "{{ controller_host }}/api/v2/jobs/?order_by=-finished&page_size=5"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: recent_jobs
+
+    - name: Query project sync health
+      uri:
+        url: "{{ controller_host }}/api/v2/projects/"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: all_projects
+
+    - name: Identify projects with a failed last sync
+      set_fact:
+        failed_projects: "{{ all_projects.json.results | selectattr('status', 'equalto', 'failed') | map(attribute='name') | list }}"
+
+    - name: Generate maintenance report
+      template:
+        src: ../templates/maintenance_report.j2
+        dest: "{{ report_dir }}/maintenance_report_{{ ansible_date_time.date }}.txt"
+        mode: '0644'
+
+    - name: Display report location
+      debug:
+        msg: "Maintenance report written to {{ report_dir }}/maintenance_report_{{ ansible_date_time.date }}.txt"
+EOF
+Subtask 3.2: Create the Maintenance Report Template
+Create the Jinja2 template referenced by the playbook above:
+
+cat > templates/maintenance_report.j2 << 'EOF'
+=================================================================
+Ansible Automation Controller Maintenance Report
+Generated: {{ ansible_date_time.iso8601 }}
+Controller: {{ controller_host }}
+=================================================================
+
+CONTROLLER HEALTH
+-----------------
+API reachable: {{ 'YES' if health_check.status == 200 else 'NO' }}
+Reported version: {{ health_check.json.version }}
+Active node: {{ health_check.json.active_node }}
+
+RECENT JOB ACTIVITY (last 5 jobs)
+----------------------------------
+{% for job in recent_jobs.json.results %}
+- ID: {{ job.id }} | Name: {{ job.name }} | Status: {{ job.status }} | Finished: {{ job.finished }}
+{% endfor %}
+{% if recent_jobs.json.results | length == 0 %}
+No jobs have been run on this Controller yet.
+{% endif %}
+
+PROJECT SYNC STATUS
+--------------------
+Total projects: {{ all_projects.json.count }}
+{% if failed_projects | length > 0 %}
+Projects with failed sync: {{ failed_projects | join(', ') }}
+{% else %}
+No projects currently show a failed sync status.
+{% endif %}
+
+=================================================================
+End of report
+=================================================================
+EOF
+Subtask 3.3: Run the Maintenance Playbook and Review the Report
+ansible-playbook playbooks/03-maintenance-check.yml
+
+# Review the generated report
+cat reports/maintenance_report_*.txt
+Deliverable: A file named reports/maintenance_report_<date>.txt exists and contains four populated sections (Controller Health, Recent Job Activity, Project Sync Status, and a closing footer). The Reported version line must show a real version string returned by the Controller, and Total projects must be at least 1 (the ansible-examples project created in Task 2).
+
+Expected Outcomes
+A working set of idempotent Ansible playbooks that configure an Automation Controller organization and project purely through its REST API
+A verified external Git repository (ansible-examples) registered and successfully synced as a Controller project
+A repeatable maintenance playbook that produces a timestamped, human-readable health report you can schedule or re-run on demand
+Troubleshooting
+Issue 1: uri tasks fail with a certificate verification error. Symptom: task output includes certificate verify failed or SSL: CERTIFICATE_VERIFY_FAILED. Diagnostic hint: check whether your Controller uses a self-signed certificate, and confirm that controller_validate_certs in group_vars/all.yml is set appropriately for your lab environment; do not disable certificate validation outside of an isolated lab.
+
+Issue 2: Organization or project lookup returns an empty results list. Symptom: a subsequent task fails with an "index out of range" or undefined-attribute error when accessing results[0]. Diagnostic hint: query the endpoint manually with the GET request from the failing task (for example, using curl with the same URL and auth header) to confirm whether the object exists and whether the name filter matches exactly, including case and whitespace.
+
+Conclusion
+In this lab, you automated the configuration of an Ansible Automation Controller environment entirely through its documented REST API, using idempotent Ansible playbooks instead of manual clicks or unsupported file edits. You created an organization, registered and synced an external Git repository as a project, and built a maintenance playbook that queries Controller health, recent job activity, and project sync status to generate a timestamped report. Along the way you practiced core Infrastructure as Code patterns: token-based authentication, idempotent create-or-lookup logic, waiting on asynchronous operations, and using Jinja2 templates to produce operational reports. From here, consider extending the maintenance playbook to alert on failed job or project statuses, integrating it into a scheduled job template inside the Controller itself, and applying the same API-driven approach to automate credential, inventory, and job template management.

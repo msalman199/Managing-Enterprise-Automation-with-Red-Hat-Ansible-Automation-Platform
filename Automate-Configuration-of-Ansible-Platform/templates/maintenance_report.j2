@@ -1,0 +1,33 @@
+=================================================================
+Ansible Automation Controller Maintenance Report
+Generated: {{ ansible_date_time.iso8601 }}
+Controller: {{ controller_host }}
+=================================================================
+
+CONTROLLER HEALTH
+-----------------
+API reachable: {{ 'YES' if health_check.status == 200 else 'NO' }}
+Reported version: {{ health_check.json.version }}
+Active node: {{ health_check.json.active_node }}
+
+RECENT JOB ACTIVITY (last 5 jobs)
+----------------------------------
+{% for job in recent_jobs.json.results %}
+- ID: {{ job.id }} | Name: {{ job.name }} | Status: {{ job.status }} | Finished: {{ job.finished }}
+{% endfor %}
+{% if recent_jobs.json.results | length == 0 %}
+No jobs have been run on this Controller yet.
+{% endif %}
+
+PROJECT SYNC STATUS
+--------------------
+Total projects: {{ all_projects.json.count }}
+{% if failed_projects | length > 0 %}
+Projects with failed sync: {{ failed_projects | join(', ') }}
+{% else %}
+No projects currently show a failed sync status.
+{% endif %}
+
+=================================================================
+End of report
+=================================================================

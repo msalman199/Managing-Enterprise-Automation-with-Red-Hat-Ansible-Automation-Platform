@@ -1,0 +1,106 @@
+---
+- name: Integrate external Git repository as a Controller project
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars_files:
+    - ../group_vars/all.yml
+
+  tasks:
+    - name: Authenticate and obtain an OAuth2 token
+      uri:
+        url: "{{ controller_host }}/api/v2/tokens/"
+        method: POST
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: yes
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          description: "Lab 10 project automation token"
+          scope: "write"
+        status_code: 201
+      register: token_result
+
+    - name: Set authentication header fact
+      set_fact:
+        auth_header:
+          Authorization: "Bearer {{ token_result.json.token }}"
+
+    - name: Look up the organization ID
+      uri:
+        url: "{{ controller_host }}/api/v2/organizations/?name={{ lab_organization_name | urlencode }}"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: org_lookup_result
+
+    - name: Fail with a clear message if the organization does not exist yet
+      assert:
+        that:
+          - org_lookup_result.json.count > 0
+        fail_msg: "Organization '{{ lab_organization_name }}' not found. Run 01-configure-organization.yml first."
+
+    - name: Store the organization ID as a fact
+      set_fact:
+        lab_organization_id: "{{ org_lookup_result.json.results[0].id }}"
+
+    - name: Create the project from the external Git repository
+      uri:
+        url: "{{ controller_host }}/api/v2/projects/"
+        method: POST
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          name: "{{ lab_project_name }}"
+          description: "Project synced from an external Git repository for Lab 10"
+          organization: "{{ lab_organization_id }}"
+          scm_type: "git"
+          scm_url: "{{ lab_project_git_url }}"
+          scm_branch: "{{ lab_project_git_branch }}"
+          scm_update_on_launch: true
+        status_code: [201, 400]
+      register: project_create_result
+
+    - name: Look up the project ID
+      uri:
+        url: "{{ controller_host }}/api/v2/projects/?name={{ lab_project_name | urlencode }}"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: project_lookup_result
+
+    - name: Store the project ID as a fact
+      set_fact:
+        lab_project_id: "{{ project_lookup_result.json.results[0].id }}"
+
+    - name: Trigger a project sync from the Git repository
+      uri:
+        url: "{{ controller_host }}/api/v2/projects/{{ lab_project_id }}/update/"
+        method: POST
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [202, 405]
+      register: project_sync_result
+
+    - name: Wait for the project sync to complete
+      uri:
+        url: "{{ controller_host }}/api/v2/projects/{{ lab_project_id }}/"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: project_status_result
+      until: project_status_result.json.status in ['successful', 'failed', 'canceled']
+      retries: 20
+      delay: 5
+
+    - name: Display project sync outcome
+      debug:
+        msg:
+          - "Project name: {{ lab_project_name }}"
+          - "Project ID: {{ lab_project_id }}"
+          - "Sync status: {{ project_status_result.json.status }}"

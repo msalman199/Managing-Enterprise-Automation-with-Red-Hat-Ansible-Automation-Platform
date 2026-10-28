@@ -1,0 +1,77 @@
+---
+- name: Perform Automation Controller maintenance health checks
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars_files:
+    - ../group_vars/all.yml
+  vars:
+    report_dir: "{{ playbook_dir }}/../reports"
+
+  tasks:
+    - name: Ensure the reports directory exists
+      file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Authenticate and obtain an OAuth2 token
+      uri:
+        url: "{{ controller_host }}/api/v2/tokens/"
+        method: POST
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: yes
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          description: "Lab 10 maintenance token"
+          scope: "write"
+        status_code: 201
+      register: token_result
+
+    - name: Set authentication header fact
+      set_fact:
+        auth_header:
+          Authorization: "Bearer {{ token_result.json.token }}"
+
+    - name: Query overall Controller health via the ping endpoint
+      uri:
+        url: "{{ controller_host }}/api/v2/ping/"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: health_check
+
+    - name: Query recent job status summary
+      uri:
+        url: "{{ controller_host }}/api/v2/jobs/?order_by=-finished&page_size=5"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: recent_jobs
+
+    - name: Query project sync health
+      uri:
+        url: "{{ controller_host }}/api/v2/projects/"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: all_projects
+
+    - name: Identify projects with a failed last sync
+      set_fact:
+        failed_projects: "{{ all_projects.json.results | selectattr('status', 'equalto', 'failed') | map(attribute='name') | list }}"
+
+    - name: Generate maintenance report
+      template:
+        src: ../templates/maintenance_report.j2
+        dest: "{{ report_dir }}/maintenance_report_{{ ansible_date_time.date }}.txt"
+        mode: '0644'
+
+    - name: Display report location
+      debug:
+        msg: "Maintenance report written to {{ report_dir }}/maintenance_report_{{ ansible_date_time.date }}.txt"

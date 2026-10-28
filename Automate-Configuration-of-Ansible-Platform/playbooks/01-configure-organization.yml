@@ -1,0 +1,60 @@
+---
+- name: Configure organization structure in Automation Controller
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars_files:
+    - ../group_vars/all.yml
+
+  tasks:
+    - name: Authenticate and obtain an OAuth2 token
+      uri:
+        url: "{{ controller_host }}/api/v2/tokens/"
+        method: POST
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: yes
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          description: "Lab 10 automation token"
+          scope: "write"
+        status_code: 201
+      register: token_result
+
+    - name: Set authentication header fact for subsequent requests
+      set_fact:
+        auth_header:
+          Authorization: "Bearer {{ token_result.json.token }}"
+
+    - name: Create the lab organization
+      uri:
+        url: "{{ controller_host }}/api/v2/organizations/"
+        method: POST
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          name: "{{ lab_organization_name }}"
+          description: "Organization created for Lab 10 automation exercises"
+        status_code: [201, 400]
+      register: org_create_result
+
+    - name: Look up the organization ID (handles both create and already-exists cases)
+      uri:
+        url: "{{ controller_host }}/api/v2/organizations/?name={{ lab_organization_name | urlencode }}"
+        method: GET
+        headers: "{{ auth_header }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: 200
+      register: org_lookup_result
+
+    - name: Store the organization ID as a fact
+      set_fact:
+        lab_organization_id: "{{ org_lookup_result.json.results[0].id }}"
+
+    - name: Display organization details
+      debug:
+        msg:
+          - "Organization name: {{ lab_organization_name }}"
+          - "Organization ID: {{ lab_organization_id }}"

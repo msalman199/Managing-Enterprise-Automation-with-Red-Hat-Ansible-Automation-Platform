@@ -1,0 +1,9 @@
+---
+controller_host: "{{ lookup('env', 'CONTROLLER_HOST') }}"
+controller_username: "{{ lookup('env', 'CONTROLLER_USER') }}"
+controller_password: "{{ lookup('env', 'CONTROLLER_PASSWORD') }}"
+controller_validate_certs: false
+lab_organization_name: "Lab Organization"
+lab_project_name: "ansible-examples"
+lab_project_git_url: "https://github.com/ansible/ansible-examples.git"
+lab_project_git_branch: "master"
