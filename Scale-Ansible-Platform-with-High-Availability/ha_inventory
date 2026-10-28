@@ -1,0 +1,14 @@
+# inventory/ha_inventory
+[app_nodes]
+app1 ansible_host=192.168.56.10
+app2 ansible_host=192.168.56.11
+
+[database]
+db1 ansible_host=192.168.56.30
+
+[load_balancer]
+lb1 ansible_host=192.168.56.40
+
+[all:vars]
+ansible_user=your_ssh_user
+ansible_python_interpreter=/usr/bin/python3

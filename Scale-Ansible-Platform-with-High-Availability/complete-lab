@@ -1,0 +1,404 @@
+Lab 13: Scale Ansible Platform with High Availability
+Objectives
+By the end of this lab, you will be able to:
+
+Design an Ansible Automation Controller High Availability (HA) architecture using multiple controller nodes, a shared PostgreSQL database, and a load balancer
+Write and execute Ansible playbooks that configure PostgreSQL, HAProxy, and controller node clustering settings
+Simulate node failure scenarios and validate that automation services remain available through a load balancer
+Build a Python monitoring script that measures HA endpoint availability and response time over a defined test window
+Interpret uptime and response-time reports to identify weak points in an HA deployment
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Ansible concepts (inventories, playbooks, modules)
+Familiarity with Linux system administration (services, packages, file permissions)
+Basic knowledge of PostgreSQL and load balancing concepts (HAProxy)
+A practice environment with at least 3 Linux VMs/containers you control (this lab uses generic hostnames/IPs that you should replace with your own lab addresses)
+Required tools
+Install the following on your control node (the machine from which you run ansible and ansible-playbook):
+
+# Install Ansible and the Python HTTP library used by the monitoring script
+python3 -m pip install --upgrade pip
+python3 -m pip install ansible requests
+
+# Verify versions
+ansible --version
+python3 -c "import requests; print(requests.__version__)"
+This lab treats the Automation Controller HA install itself as out of scope (it requires subscription-gated installer bundles). Instead, we focus on the parts every learner can run and verify in a self-owned lab: the supporting PostgreSQL configuration, the HAProxy load balancer that would front real controller nodes, failover simulation against that load balancer, and a Python-based HA monitoring tool. This keeps every command in this lab real, runnable, and checkable without depending on proprietary installer media.
+
+Lab Environment Setup
+Use three or more machines (VMs, containers, or cloud instances) that you own or that were provisioned for this training. Example role assignment used throughout this lab:
+
+Role	Example hostname	Example IP
+Database node	db1	192.168.56.30
+App node 1 (simulated controller)	app1	192.168.56.10
+App node 2 (simulated controller)	app2	192.168.56.11
+Load balancer	lb1	192.168.56.40
+Replace the IPs in every example below with the actual addresses of your lab machines. All nodes must be reachable via SSH from your control node with a working ansible_user and SSH key.
+
+Create your inventory file:
+
+# inventory/ha_inventory
+[app_nodes]
+app1 ansible_host=192.168.56.10
+app2 ansible_host=192.168.56.11
+
+[database]
+db1 ansible_host=192.168.56.30
+
+[load_balancer]
+lb1 ansible_host=192.168.56.40
+
+[all:vars]
+ansible_user=your_ssh_user
+ansible_python_interpreter=/usr/bin/python3
+Verify connectivity before continuing:
+
+ansible all -i inventory/ha_inventory -m ping
+Expected result: every host returns "ping": "pong" with a SUCCESS status. If any host fails, resolve SSH/inventory issues before moving on.
+
+Task 1: Configure the Shared PostgreSQL Backend
+A shared database is the foundation of any Automation Controller HA cluster: every app node reads and writes to the same PostgreSQL instance so that job history, credentials, and inventories stay consistent regardless of which node served the request.
+
+Step 1.1: Install PostgreSQL
+ansible database -i inventory/ha_inventory -m package -a "name=postgresql-server state=present" --become
+ansible database -i inventory/ha_inventory -m package -a "name=postgresql-contrib state=present" --become
+Step 1.2: Initialize and configure PostgreSQL for remote access
+Create the playbook:
+
+# playbooks/configure_postgresql.yml
+---
+- name: Configure PostgreSQL for Ansible Platform HA
+  hosts: database
+  become: yes
+  tasks:
+    - name: Check if database is already initialized
+      stat:
+        path: /var/lib/pgsql/data/PG_VERSION
+      register: pg_data
+
+    - name: Initialize PostgreSQL database
+      command: postgresql-setup --initdb
+      when: not pg_data.stat.exists
+
+    - name: Allow remote connections in postgresql.conf
+      lineinfile:
+        path: /var/lib/pgsql/data/postgresql.conf
+        regexp: '^#?listen_addresses'
+        line: "listen_addresses = '*'"
+        backup: yes
+
+    - name: Allow app node subnet in pg_hba.conf
+      blockinfile:
+        path: /var/lib/pgsql/data/pg_hba.conf
+        marker: "# {mark} ANSIBLE HA LAB BLOCK"
+        block: |
+          host    awx             awx             192.168.56.0/24         md5
+        backup: yes
+
+    - name: Start and enable PostgreSQL
+      service:
+        name: postgresql
+        state: restarted
+        enabled: yes
+
+    - name: Create awx database
+      postgresql_db:
+        name: awx
+        state: present
+      become_user: postgres
+
+    - name: Create awx database user
+      postgresql_user:
+        name: awx
+        password: "awx_password"
+        db: awx
+        priv: ALL
+        state: present
+      become_user: postgres
+Run it:
+
+ansible-playbook -i inventory/ha_inventory playbooks/configure_postgresql.yml
+Step 1.3: Verify the database is reachable from an app node
+ansible app_nodes -i inventory/ha_inventory -m package -a "name=postgresql state=present" --become
+ansible app_nodes -i inventory/ha_inventory -m shell -a "PGPASSWORD=awx_password psql -h 192.168.56.30 -U awx -d awx -c 'SELECT version();'"
+Deliverable: Command output from Step 1.3 showing the PostgreSQL version string returned successfully from both app1 and app2, confirming the shared database backend is reachable from every app node. This is the required evidence that your HA data layer is correctly configured before adding a load balancer in Task 2.
+
+Task 2: Configure the HAProxy Load Balancer
+With a shared database in place, a load balancer distributes client traffic across app nodes so that the failure of any single node does not interrupt service. In a full Automation Controller HA deployment, automation_controller_backend would point at real controller instances; here we front two simple HTTP services on app1 and app2 to validate the exact same load-balancing and failover mechanics with tools you can fully inspect.
+
+Step 2.1: Start a simple HTTP health endpoint on each app node
+For this lab we simulate the controller's /api/v2/ping/ health endpoint with a minimal Python HTTP server so failover behavior can be observed without a full controller install.
+
+# playbooks/deploy_test_service.yml
+---
+- name: Deploy simple health endpoint to simulate controller nodes
+  hosts: app_nodes
+  become: yes
+  tasks:
+    - name: Create app directory
+      file:
+        path: /opt/ha_test_app
+        state: directory
+        mode: '0755'
+
+    - name: Deploy simple health check server
+      copy:
+        dest: /opt/ha_test_app/server.py
+        mode: '0755'
+        content: |
+          #!/usr/bin/env python3
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+          import socket
+
+          class PingHandler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  if self.path == "/api/v2/ping/":
+                      self.send_response(200)
+                      self.send_header("Content-Type", "application/json")
+                      self.end_headers()
+                      body = '{"node": "%s", "status": "ok"}' % socket.gethostname()
+                      self.wfile.write(body.encode())
+                  else:
+                      self.send_response(404)
+                      self.end_headers()
+
+              def log_message(self, format, *args):
+                  return
+
+          if __name__ == "__main__":
+              server = HTTPServer(("0.0.0.0", 8080), PingHandler)
+              server.serve_forever()
+
+    - name: Create systemd unit for the test service
+      copy:
+        dest: /etc/systemd/system/ha-test-app.service
+        content: |
+          [Unit]
+          Description=HA Lab Test Health Endpoint
+          After=network.target
+
+          [Service]
+          ExecStart=/usr/bin/python3 /opt/ha_test_app/server.py
+          Restart=always
+          User=root
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Start and enable the test service
+      systemd:
+        name: ha-test-app
+        state: started
+        enabled: yes
+        daemon_reload: yes
+Run it:
+
+ansible-playbook -i inventory/ha_inventory playbooks/deploy_test_service.yml
+Verify directly against each node before adding the load balancer:
+
+ansible app_nodes -i inventory/ha_inventory -m uri -a "url=http://localhost:8080/api/v2/ping/ return_content=yes"
+Expected result: both nodes return HTTP 200 with a JSON body similar to {"node": "app1", "status": "ok"}.
+
+Step 2.2: Install and configure HAProxy
+# playbooks/configure_haproxy.yml
+---
+- name: Configure HAProxy for HA app node cluster
+  hosts: load_balancer
+  become: yes
+  tasks:
+    - name: Install HAProxy
+      package:
+        name: haproxy
+        state: present
+
+    - name: Deploy HAProxy configuration
+      copy:
+        dest: /etc/haproxy/haproxy.cfg
+        backup: yes
+        content: |
+          global
+              log 127.0.0.1 local0
+              maxconn 2000
+              daemon
+
+          defaults
+              mode http
+              log global
+              option httplog
+              option dontlognull
+              timeout connect 5s
+              timeout client 30s
+              timeout server 30s
+
+          frontend app_frontend
+              bind *:80
+              default_backend app_backend
+
+          backend app_backend
+              balance roundrobin
+              option httpchk GET /api/v2/ping/
+              http-check expect status 200
+              server app1 192.168.56.10:8080 check
+              server app2 192.168.56.11:8080 check
+
+          listen stats
+              bind *:8404
+              stats enable
+              stats uri /stats
+              stats refresh 10s
+      notify: restart haproxy
+
+    - name: Start and enable HAProxy
+      service:
+        name: haproxy
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart haproxy
+      service:
+        name: haproxy
+        state: restarted
+Run it:
+
+ansible-playbook -i inventory/ha_inventory playbooks/configure_haproxy.yml
+Step 2.3: Verify load balancing
+for i in 1 2 3 4; do curl -s http://192.168.56.40/api/v2/ping/; echo; done
+Deliverable: Output showing responses alternating between "node": "app1" and "node": "app2", confirming HAProxy is distributing requests round-robin across both backend nodes. Also open http://192.168.56.40:8404/stats in a browser or with curl and confirm both app1 and app2 show status UP in the app_backend section.
+
+Task 3: Simulate Failover and Monitor HA Performance
+With the database and load balancer in place, we now validate that the cluster tolerates node failure and build a monitoring tool to measure availability quantitatively.
+
+Step 3.1: Simulate a node failure
+# Stop the service on app1 to simulate a node failure
+ansible app1 -i inventory/ha_inventory -m systemd -a "name=ha-test-app state=stopped" --become
+
+# Confirm HAProxy still serves traffic, now only from app2
+for i in 1 2 3 4; do curl -s http://192.168.56.40/api/v2/ping/; echo; done
+Expected result: all responses now show "node": "app2" and the requests still succeed with no connection errors, since HAProxy's health check removed app1 from rotation.
+
+Check the HAProxy stats page again and confirm app1 now shows status DOWN while app2 remains UP.
+
+Restore the node before continuing:
+
+ansible app1 -i inventory/ha_inventory -m systemd -a "name=ha-test-app state=started" --become
+sleep 5
+for i in 1 2 3 4; do curl -s http://192.168.56.40/api/v2/ping/; echo; done
+Expected result: responses again alternate between app1 and app2, confirming automatic recovery once the health check passes.
+
+Deliverable: Two captured curl output sets: one showing traffic served only by app2 during the simulated outage, and one showing traffic restored to both nodes afterward.
+
+Step 3.2: Build the HA monitoring script
+Create the complete monitoring script:
+
+#!/usr/bin/env python3
+# monitor_ha_performance.py
+
+import requests
+import time
+from datetime import datetime
+import threading
+
+class HAMonitor:
+    def __init__(self, base_url, check_interval=5):
+        self.base_url = base_url
+        self.check_interval = check_interval
+        self.monitoring = True
+        self.results = []
+        self.lock = threading.Lock()
+
+    def check_health(self):
+        """Perform a single health check against the load balancer endpoint."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/api/v2/ping/",
+                timeout=5
+            )
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'status': 'healthy' if response.status_code == 200 else 'unhealthy',
+                'response_time': response.elapsed.total_seconds(),
+                'status_code': response.status_code
+            }
+        except requests.exceptions.RequestException as e:
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'status': 'error',
+                'response_time': None,
+                'status_code': None,
+                'error': str(e)
+            }
+
+    def monitor_loop(self):
+        """Continuously poll the health endpoint until monitoring is stopped."""
+        while self.monitoring:
+            result = self.check_health()
+            with self.lock:
+                self.results.append(result)
+
+            rt = f"{result['response_time']:.3f}s" if result['response_time'] is not None else "N/A"
+            print(f"[{result['timestamp']}] status={result['status']} response_time={rt}")
+
+            time.sleep(self.check_interval)
+
+    def start_monitoring(self, duration=300):
+        """Start monitoring for the given duration in seconds, then report."""
+        print(f"Starting HA monitoring against {self.base_url} for {duration} seconds...")
+
+        monitor_thread = threading.Thread(target=self.monitor_loop)
+        monitor_thread.start()
+
+        time.sleep(duration)
+        self.monitoring = False
+        monitor_thread.join()
+
+        self.generate_report()
+
+    def generate_report(self):
+        """Generate a summary report of collected results."""
+        print("\n=== HA MONITORING REPORT ===")
+
+        total = len(self.results)
+        healthy = len([r for r in self.results if r['status'] == 'healthy'])
+        uptime_pct = (healthy / total) * 100 if total > 0 else 0
+
+        print(f"Total checks: {total}")
+        print(f"Healthy checks: {healthy}")
+        print(f"Uptime: {uptime_pct:.2f}%")
+
+        response_times = [r['response_time'] for r in self.results if r['response_time'] is not None]
+        if response_times:
+            avg_response = sum(response_times) / len(response_times)
+            max_response = max(response_times)
+            min_response = min(response_times)
+            print(f"Average response time: {avg_response:.3f}s")
+            print(f"Min response time: {min_response:.3f}s")
+            print(f"Max response time: {max_response:.3f}s")
+        else:
+            print("No successful responses were recorded.")
+
+
+if __name__ == "__main__":
+    monitor = HAMonitor(base_url="http://192.168.56.40", check_interval=5)
+    monitor.start_monitoring(duration=300)
+Step 3.3: Run the monitor while triggering a failover
+Run the script in one terminal:
+
+python3 monitor_ha_performance.py
+While it runs (it monitors for 300 seconds by default), in a second terminal stop and restart app1 partway through to observe the monitor's response:
+
+ansible app1 -i inventory/ha_inventory -m systemd -a "name=ha-test-app state=stopped" --become
+sleep 30
+ansible app1 -i inventory/ha_inventory -m systemd -a "name=ha-test-app state=started" --become
+Deliverable: The final report printed by monitor_ha_performance.py, showing an uptime percentage close to 100% (since HAProxy routed around the stopped node) along with average, minimum, and maximum response times. If you see a drop in uptime, it indicates the health check interval or HAProxy http-check timing needs tuning, which is expected learning from this exercise.
+
+Expected Outcomes
+A working PostgreSQL backend configured for remote access by app nodes, verified by a successful psql connection and query
+An HAProxy load balancer that correctly distributes traffic across two app nodes and removes a node from rotation when its health check fails
+A Python monitoring report showing measured uptime percentage and response-time statistics collected across a simulated node failure and recovery
+Troubleshooting
+psql: could not connect to server from an app node: Check that pg_hba.conf includes the correct subnet and that postgresql.conf has listen_addresses = '*'; also confirm the database node's firewall allows port 5432 from the app node subnet.
+HAProxy stats page shows a backend as DOWN even though the service is running: Verify the health check path (/api/v2/ping/) matches exactly what the test server responds to, and check that the service is bound to 0.0.0.0 rather than 127.0.0.1 so HAProxy on a different host can reach it.
+Conclusion
+In this lab you built the core building blocks of an Ansible Automation Platform high availability deployment: a shared PostgreSQL database reachable by multiple application nodes, an HAProxy load balancer performing active health checks, and a Python-based monitoring tool that quantifies uptime and response time across a simulated node failure. By stopping and restarting a node while traffic was flowing, you observed firsthand how a load balancer's health checks detect failure and reroute traffic without interrupting service, and how monitoring data can be used to verify that an HA design meets its availability goals. These same patterns, shared state, health checked load balancing, and continuous monitoring, are exactly what a production Automation Controller and Automation Hub HA cluster relies on, giving you a practical foundation for scaling and troubleshooting real enterprise Ansible Platform deployments.
