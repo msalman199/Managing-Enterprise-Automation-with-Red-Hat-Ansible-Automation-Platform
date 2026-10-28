@@ -1,0 +1,27 @@
+---
+- name: Rollback Playbook
+  hosts: all
+  become: yes
+  tasks:
+    - name: Stop nginx service
+      systemd:
+        name: nginx
+        state: stopped
+      ignore_errors: yes
+      
+    - name: Remove application files
+      file:
+        path: /var/www/html/index.html
+        state: absent
+        
+    - name: Remove update markers
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/system_updated
+        - /tmp/health_check_passed
+        
+    - name: Log rollback completion
+      debug:
+        msg: "Rollback completed successfully on {{ inventory_hostname }}"

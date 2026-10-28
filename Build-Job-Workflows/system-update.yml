@@ -1,0 +1,25 @@
+---
+- name: System Update Playbook
+  hosts: all
+  become: yes
+  tasks:
+    - name: Update package cache (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      
+    - name: Update package cache (RHEL/CentOS)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display system information
+      debug:
+        msg: "System {{ inventory_hostname }} updated successfully"
+        
+    - name: Create update completion marker
+      file:
+        path: /tmp/system_updated
+        state: touch
+        mode: '0644'

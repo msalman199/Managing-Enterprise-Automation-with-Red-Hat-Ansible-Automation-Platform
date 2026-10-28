@@ -1,0 +1,28 @@
+---
+- name: Environment Check Playbook
+  hosts: all
+  tasks:
+    - name: Check available disk space
+      shell: df -h / | awk 'NR==2 {print $5}' | sed 's/%//'
+      register: disk_usage
+      
+    - name: Check available memory
+      shell: free | grep Mem | awk '{printf "%.0f", $3/$2 * 100.0}'
+      register: memory_usage
+      
+    - name: Set environment status
+      set_fact:
+        environment_ready: "{{ (disk_usage.stdout|int < 80) and (memory_usage.stdout|int < 80) }}"
+        
+    - name: Display environment status
+      debug:
+        msg: |
+          Environment Check Results:
+          - Disk Usage: {{ disk_usage.stdout }}%
+          - Memory Usage: {{ memory_usage.stdout }}%
+          - Environment Ready: {{ environment_ready }}
+          
+    - name: Fail if environment not ready
+      fail:
+        msg: "Environment check failed - insufficient resources"
+      when: not environment_ready

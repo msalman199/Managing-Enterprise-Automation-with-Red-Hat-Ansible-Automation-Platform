@@ -1,0 +1,40 @@
+---
+- name: Application Deployment Playbook
+  hosts: all
+  become: yes
+  tasks:
+    - name: Check if system update completed
+      stat:
+        path: /tmp/system_updated
+      register: update_status
+      
+    - name: Fail if system not updated
+      fail:
+        msg: "System update must be completed before application deployment"
+      when: not update_status.stat.exists
+      
+    - name: Install required packages
+      package:
+        name:
+          - nginx
+          - git
+        state: present
+        
+    - name: Start and enable nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+        
+    - name: Deploy sample application
+      copy:
+        content: |
+          <html>
+          <head><title>Workflow Deployment Success</title></head>
+          <body>
+            <h1>Application Deployed Successfully!</h1>
+            <p>Deployed via Ansible Workflow on {{ ansible_date_time.iso8601 }}</p>
+          </body>
+          </html>
+        dest: /var/www/html/index.html
+        mode: '0644'

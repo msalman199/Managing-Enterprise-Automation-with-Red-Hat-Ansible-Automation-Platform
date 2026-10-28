@@ -1,0 +1,24 @@
+---
+- name: Notification Playbook
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Send success notification
+      debug:
+        msg: |
+          WORKFLOW NOTIFICATION:
+          Status: {{ workflow_status | default('SUCCESS') }}
+          Timestamp: {{ ansible_date_time.iso8601 }}
+          Workflow: Complete Application Deployment
+          
+    - name: Write notification to file
+      copy:
+        content: |
+          Workflow Execution Report
+          ========================
+          Status: {{ workflow_status | default('SUCCESS') }}
+          Completed: {{ ansible_date_time.iso8601 }}
+          Workflow: Complete Application Deployment Workflow
+        dest: /tmp/workflow_notification.txt
+        mode: '0644'
+      delegate_to: localhost

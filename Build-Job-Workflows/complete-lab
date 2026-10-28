@@ -1,0 +1,495 @@
+Lab 8: Build Job Workflows
+Objectives
+By the end of this lab, you will be able to:
+
+Design and create job workflows that chain multiple job templates together
+Implement conditional logic to control workflow execution paths
+Configure job dependencies and success/failure conditions
+Test and execute complex workflows in Ansible Automation Platform
+Troubleshoot workflow execution issues and optimize workflow performance
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Ansible playbooks and job templates
+Familiarity with Ansible Automation Platform (AWX/Tower) interface
+Knowledge of YAML syntax and Ansible inventory concepts
+Completion of previous labs covering job templates and inventories
+Understanding of conditional statements and logic operators
+Lab Environment
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines with Ansible Automation Platform already installed. Simply click Start Lab to access your environment - no need to build your own VM or install software.
+
+Your lab environment includes:
+
+Ansible Automation Platform (AWX) web interface
+Pre-configured inventories and credentials
+Sample playbooks and job templates
+Multiple target hosts for testing workflows
+Task 1: Create a Job Workflow with Dependencies
+Subtask 1.1: Prepare Required Job Templates
+First, we need to create the individual job templates that will be part of our workflow.
+
+Access the Ansible Automation Platform interface
+
+Open your web browser and navigate to the AWX interface
+Log in with the provided credentials
+Create the first job template - System Update
+
+Navigate to Templates in the left sidebar
+Click Add and select Job Template
+Fill in the following details:
+Name: System Update Job
+Job Type: Run
+Inventory: Select your available inventory
+Project: Select your project containing playbooks
+Playbook: Create or select a system update playbook
+Credentials: Select appropriate machine credentials
+Create the system update playbook
+
+Create a file named system-update.yml in your project directory:
+
+---
+- name: System Update Playbook
+  hosts: all
+  become: yes
+  tasks:
+    - name: Update package cache (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      
+    - name: Update package cache (RHEL/CentOS)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      
+    - name: Display system information
+      debug:
+        msg: "System {{ inventory_hostname }} updated successfully"
+        
+    - name: Create update completion marker
+      file:
+        path: /tmp/system_updated
+        state: touch
+        mode: '0644'
+Create the second job template - Application Deployment
+
+Click Add and select Job Template again
+Fill in the following details:
+Name: Application Deployment Job
+Job Type: Run
+Inventory: Select the same inventory
+Project: Select your project
+Playbook: Create or select an application deployment playbook
+Create the application deployment playbook
+
+Create a file named app-deployment.yml:
+
+---
+- name: Application Deployment Playbook
+  hosts: all
+  become: yes
+  tasks:
+    - name: Check if system update completed
+      stat:
+        path: /tmp/system_updated
+      register: update_status
+      
+    - name: Fail if system not updated
+      fail:
+        msg: "System update must be completed before application deployment"
+      when: not update_status.stat.exists
+      
+    - name: Install required packages
+      package:
+        name:
+          - nginx
+          - git
+        state: present
+        
+    - name: Start and enable nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+        
+    - name: Deploy sample application
+      copy:
+        content: |
+          <html>
+          <head><title>Workflow Deployment Success</title></head>
+          <body>
+            <h1>Application Deployed Successfully!</h1>
+            <p>Deployed via Ansible Workflow on {{ ansible_date_time.iso8601 }}</p>
+          </body>
+          </html>
+        dest: /var/www/html/index.html
+        mode: '0644'
+Create the third job template - Health Check
+
+Create another job template named Health Check Job
+Use the same inventory and project settings
+Create the health check playbook
+
+Create a file named health-check.yml:
+
+---
+- name: Health Check Playbook
+  hosts: all
+  tasks:
+    - name: Check nginx service status
+      systemd:
+        name: nginx
+      register: nginx_status
+      
+    - name: Verify web service response
+      uri:
+        url: "http://{{ inventory_hostname }}"
+        method: GET
+        status_code: 200
+      register: web_response
+      
+    - name: Display health check results
+      debug:
+        msg: |
+          Health Check Results:
+          - Nginx Status: {{ nginx_status.status.ActiveState }}
+          - Web Response: {{ web_response.status }}
+          - Health Check: PASSED
+          
+    - name: Create health check completion marker
+      file:
+        path: /tmp/health_check_passed
+        state: touch
+        mode: '0644'
+Subtask 1.2: Create the Workflow Template
+Navigate to Workflow Templates
+
+In the AWX interface, click Templates in the left sidebar
+Click Add and select Workflow Template
+Configure the workflow template
+
+Name: Complete Application Deployment Workflow
+Description: End-to-end workflow for system update, app deployment, and health check
+Organization: Select your organization
+Inventory: Select your inventory
+Click Save
+Access the Workflow Visualizer
+
+After saving, click Workflow Visualizer button
+This opens the graphical workflow editor
+Subtask 1.3: Build the Workflow Structure
+Add the first job node
+
+Click Start button in the visualizer
+Select Job Template
+Choose System Update Job from the dropdown
+Click Select
+Configure success path
+
+Hover over the System Update Job node
+Click the + icon that appears on the right side
+Select On Success from the dropdown
+Choose Job Template
+Select Application Deployment Job
+Click Select
+Add health check dependency
+
+Hover over the Application Deployment Job node
+Click the + icon on the right side
+Select On Success
+Choose Job Template
+Select Health Check Job
+Click Select
+Save the workflow
+
+Click Save in the workflow visualizer
+Return to the main workflow template page
+Task 2: Implement Conditional Logic
+Subtask 2.1: Create Conditional Job Templates
+Create a rollback job template
+
+Navigate to Templates and create a new job template
+Name: Rollback Job
+Configure with appropriate settings
+Create the rollback playbook
+
+Create a file named rollback.yml:
+
+---
+- name: Rollback Playbook
+  hosts: all
+  become: yes
+  tasks:
+    - name: Stop nginx service
+      systemd:
+        name: nginx
+        state: stopped
+      ignore_errors: yes
+      
+    - name: Remove application files
+      file:
+        path: /var/www/html/index.html
+        state: absent
+        
+    - name: Remove update markers
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/system_updated
+        - /tmp/health_check_passed
+        
+    - name: Log rollback completion
+      debug:
+        msg: "Rollback completed successfully on {{ inventory_hostname }}"
+Create a notification job template
+
+Create another job template named Notification Job
+Create the notification playbook
+
+Create a file named notification.yml:
+
+---
+- name: Notification Playbook
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Send success notification
+      debug:
+        msg: |
+          WORKFLOW NOTIFICATION:
+          Status: {{ workflow_status | default('SUCCESS') }}
+          Timestamp: {{ ansible_date_time.iso8601 }}
+          Workflow: Complete Application Deployment
+          
+    - name: Write notification to file
+      copy:
+        content: |
+          Workflow Execution Report
+          ========================
+          Status: {{ workflow_status | default('SUCCESS') }}
+          Completed: {{ ansible_date_time.iso8601 }}
+          Workflow: Complete Application Deployment Workflow
+        dest: /tmp/workflow_notification.txt
+        mode: '0644'
+      delegate_to: localhost
+Subtask 2.2: Enhance Workflow with Conditional Logic
+Return to the Workflow Visualizer
+
+Open your Complete Application Deployment Workflow
+Click Workflow Visualizer
+Add failure handling for System Update
+
+Hover over the System Update Job node
+Click the + icon
+Select On Failure from the dropdown
+Choose Job Template
+Select Notification Job
+Click Select
+Add failure handling for Application Deployment
+
+Hover over the Application Deployment Job node
+Click the + icon
+Select On Failure
+Choose Job Template
+Select Rollback Job
+Click Select
+Add conditional path after rollback
+
+Hover over the Rollback Job node
+Click the + icon
+Select Always (runs regardless of rollback success/failure)
+Choose Job Template
+Select Notification Job
+Click Select
+Add success notification
+
+Hover over the Health Check Job node
+Click the + icon
+Select On Success
+Choose Job Template
+Select Notification Job
+Click Select
+Subtask 2.3: Configure Advanced Conditional Logic
+Create a conditional decision job
+
+Create a new job template named Environment Check Job
+Create the environment check playbook
+
+Create a file named environment-check.yml:
+
+---
+- name: Environment Check Playbook
+  hosts: all
+  tasks:
+    - name: Check available disk space
+      shell: df -h / | awk 'NR==2 {print $5}' | sed 's/%//'
+      register: disk_usage
+      
+    - name: Check available memory
+      shell: free | grep Mem | awk '{printf "%.0f", $3/$2 * 100.0}'
+      register: memory_usage
+      
+    - name: Set environment status
+      set_fact:
+        environment_ready: "{{ (disk_usage.stdout|int < 80) and (memory_usage.stdout|int < 80) }}"
+        
+    - name: Display environment status
+      debug:
+        msg: |
+          Environment Check Results:
+          - Disk Usage: {{ disk_usage.stdout }}%
+          - Memory Usage: {{ memory_usage.stdout }}%
+          - Environment Ready: {{ environment_ready }}
+          
+    - name: Fail if environment not ready
+      fail:
+        msg: "Environment check failed - insufficient resources"
+      when: not environment_ready
+Add environment check to workflow
+In the Workflow Visualizer, add the Environment Check Job between the start and System Update Job
+Configure it to run first, with System Update Job running on success
+Task 3: Test and Execute the Workflow
+Subtask 3.1: Validate Workflow Configuration
+Review workflow structure
+
+In the Workflow Visualizer, verify your workflow has the following structure:
+Start → Environment Check Job
+Environment Check Job (Success) → System Update Job
+System Update Job (Success) → Application Deployment Job
+System Update Job (Failure) → Notification Job
+Application Deployment Job (Success) → Health Check Job
+Application Deployment Job (Failure) → Rollback Job
+Rollback Job (Always) → Notification Job
+Health Check Job (Success) → Notification Job
+Save the workflow
+
+Click Save in the visualizer
+Return to the workflow template details page
+Subtask 3.2: Execute the Workflow
+Launch the workflow
+
+From the workflow template page, click Launch
+Monitor the execution in real-time
+Observe workflow execution
+
+Watch as each job executes in sequence
+Note how the workflow follows the success path when jobs complete successfully
+Observe the conditional logic in action
+Monitor job details
+
+Click on individual job nodes during execution to view detailed output
+Check the Jobs section to see individual job results
+Subtask 3.3: Test Failure Scenarios
+Create a failing job template
+Create a job template named Intentional Failure Job
+Use a simple playbook that always fails:
+---
+- name: Intentional Failure Playbook
+  hosts: all
+  tasks:
+    - name: This task will always fail
+      fail:
+        msg: "Intentional failure for testing workflow logic"
+Modify workflow to test failure path
+
+In the Workflow Visualizer, temporarily replace one of the jobs with the Intentional Failure Job
+Save and launch the workflow
+Observe how the workflow handles the failure and follows the failure path
+Test different failure scenarios
+
+Test failure at different points in the workflow
+Verify that rollback procedures execute correctly
+Confirm that notifications are sent appropriately
+Subtask 3.4: Advanced Workflow Features
+Add workflow variables
+In the workflow template, click Variables
+Add the following variables:
+---
+environment_type: "production"
+notification_email: "admin@example.com"
+rollback_enabled: true
+max_retries: 3
+Create a survey for the workflow
+
+Click Survey tab in the workflow template
+Add survey questions:
+Environment Type: Multiple choice (development, staging, production)
+Enable Notifications: Boolean
+Rollback on Failure: Boolean
+Configure job template variables
+
+Update your job templates to use workflow variables
+Example modification for the notification playbook:
+---
+- name: Enhanced Notification Playbook
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Send enhanced notification
+      debug:
+        msg: |
+          WORKFLOW NOTIFICATION:
+          Environment: {{ environment_type | default('unknown') }}
+          Status: {{ workflow_status | default('SUCCESS') }}
+          Timestamp: {{ ansible_date_time.iso8601 }}
+          Rollback Enabled: {{ rollback_enabled | default(false) }}
+          Email: {{ notification_email | default('none') }}
+Troubleshooting Common Issues
+Issue 1: Workflow Jobs Not Executing in Order
+Problem: Jobs execute simultaneously instead of sequentially
+
+Solution:
+
+Verify that job dependencies are properly configured in the Workflow Visualizer
+Ensure that success/failure conditions are set correctly
+Check that there are no circular dependencies in the workflow
+Issue 2: Conditional Logic Not Working
+Problem: Failure paths don't execute when jobs fail
+
+Solution:
+
+Confirm that failure conditions are configured (On Failure, not just On Success)
+Verify that job templates are configured to fail appropriately
+Check that the workflow template has the correct node connections
+Issue 3: Variables Not Passing Between Jobs
+Problem: Job templates can't access workflow variables
+
+Solution:
+
+Ensure variables are defined at the workflow template level
+Use the correct variable syntax in job template playbooks
+Verify that extra variables are enabled in job templates
+Issue 4: Workflow Hangs or Doesn't Complete
+Problem: Workflow execution stops unexpectedly
+
+Solution:
+
+Check individual job logs for errors
+Verify that all required credentials are available
+Ensure target hosts are accessible
+Review workflow node configurations for missing connections
+Conclusion
+In this lab, you have successfully:
+
+Created complex job workflows that chain multiple job templates together with proper dependencies
+Implemented conditional logic to control workflow execution paths based on success or failure conditions
+Tested workflow execution in various scenarios including both success and failure paths
+Configured advanced features such as workflow variables, surveys, and enhanced error handling
+Why This Matters:
+
+Job workflows are essential for enterprise automation because they:
+
+Orchestrate complex processes that require multiple steps and dependencies
+Provide error handling and recovery mechanisms for robust automation
+Enable conditional execution based on runtime conditions and results
+Improve operational efficiency by automating entire business processes, not just individual tasks
+Ensure consistency in deployment and operational procedures across environments
+The skills you've developed in this lab are directly applicable to real-world scenarios such as:
+
+Application deployment pipelines with testing, deployment, and rollback capabilities
+Infrastructure provisioning workflows that handle dependencies between resources
+Compliance and security workflows that perform checks and remediation
+Disaster recovery procedures with automated failover and notification systems
+You now have the foundation to design and implement sophisticated automation workflows that can handle complex enterprise requirements while providing the reliability and error handling necessary for production environments.

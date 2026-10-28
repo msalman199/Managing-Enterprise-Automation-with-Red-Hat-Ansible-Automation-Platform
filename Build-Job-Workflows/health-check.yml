@@ -1,0 +1,29 @@
+---
+- name: Health Check Playbook
+  hosts: all
+  tasks:
+    - name: Check nginx service status
+      systemd:
+        name: nginx
+      register: nginx_status
+      
+    - name: Verify web service response
+      uri:
+        url: "http://{{ inventory_hostname }}"
+        method: GET
+        status_code: 200
+      register: web_response
+      
+    - name: Display health check results
+      debug:
+        msg: |
+          Health Check Results:
+          - Nginx Status: {{ nginx_status.status.ActiveState }}
+          - Web Response: {{ web_response.status }}
+          - Health Check: PASSED
+          
+    - name: Create health check completion marker
+      file:
+        path: /tmp/health_check_passed
+        state: touch
+        mode: '0644'
