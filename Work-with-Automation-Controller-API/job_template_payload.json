@@ -1,0 +1,16 @@
+{
+  "name": "Lab17-Demo-Job-Template",
+  "description": "Demo job template created via API",
+  "job_type": "run",
+  "inventory": ,
+  "project": ,
+  "playbook": "lamp_simple/site.yml",
+  "verbosity": 1,
+  "ask_variables_on_launch": true,
+  "ask_limit_on_launch": false,
+  "ask_tags_on_launch": false,
+  "ask_skip_tags_on_launch": false,
+  "ask_job_type_on_launch": false,
+  "ask_inventory_on_launch": false,
+  "ask_credential_on_launch": false
+}

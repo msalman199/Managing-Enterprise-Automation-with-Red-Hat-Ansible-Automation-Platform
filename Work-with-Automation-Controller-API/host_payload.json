@@ -1,0 +1,6 @@
+{
+  "name": "localhost",
+  "description": "Local host for demo",
+  "inventory": ,
+  "variables": "ansible_connection: local"
+}

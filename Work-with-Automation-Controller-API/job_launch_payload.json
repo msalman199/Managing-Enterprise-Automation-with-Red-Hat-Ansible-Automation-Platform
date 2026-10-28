@@ -1,0 +1,6 @@
+{
+  "extra_vars": {
+    "demo_var": "Hello from API",
+    "environment": "lab"
+  }
+}

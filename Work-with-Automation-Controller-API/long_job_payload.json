@@ -1,0 +1,5 @@
+{
+  "extra_vars": {
+    "sleep_duration": 60
+  }
+}
