@@ -1,0 +1,30 @@
+---
+- name: Configure Web Servers
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Verify this is a web server
+      assert:
+        that:
+          - server_type == "web"
+        fail_msg: "This playbook should only run on web servers"
+        success_msg: "Confirmed: This is a web server"
+
+    - name: Install web server package (simulation)
+      debug:
+        msg: "Installing nginx on {{ inventory_hostname }}"
+
+    - name: Configure web server
+      copy:
+        content: |
+          # Web Server Configuration
+          Server: {{ inventory_hostname }}
+          Type: {{ server_type }}
+          Region: {{ region }}
+          Configured: {{ ansible_date_time.iso8601 }}
+        dest: "/tmp/web-config-{{ inventory_hostname }}.conf"
+      become: yes
+
+    - name: Display web server status
+      debug:
+        msg: "Web server {{ inventory_hostname }} configured successfully"

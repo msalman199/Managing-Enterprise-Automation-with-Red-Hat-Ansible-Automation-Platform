@@ -1,0 +1,28 @@
+---
+- name: Test Smart Inventory Targeting
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Display host information
+      debug:
+        msg: |
+          Host: {{ inventory_hostname }}
+          Server Type: {{ server_type | default('undefined') }}
+          Environment: {{ environment | default('undefined') }}
+          Region: {{ region | default('undefined') }}
+          CPU Cores: {{ cpu_cores | default('undefined') }}
+          Memory GB: {{ memory_gb | default('undefined') }}
+
+    - name: Create identification file
+      file:
+        path: "/tmp/smart-inventory-test-{{ server_type | default('unknown') }}.txt"
+        state: touch
+        mode: '0644'
+      become: yes
+
+    - name: Write host details to file
+      lineinfile:
+        path: "/tmp/smart-inventory-test-{{ server_type | default('unknown') }}.txt"
+        line: "{{ inventory_hostname }} - {{ ansible_date_time.iso8601 }}"
+        create: yes
+      become: yes

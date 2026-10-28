@@ -1,0 +1,424 @@
+Lab 9: Manage Advanced Inventories with Smart Inventories
+Objectives
+By the end of this lab, you will be able to:
+
+Understand the concept and benefits of smart inventories in Ansible
+Create smart inventories with dynamic host filters
+Configure host selection criteria using various filter parameters
+Test dynamic inventory functionality with real-time host targeting
+Execute jobs against smart inventories to validate dynamic behavior
+Troubleshoot common smart inventory configuration issues
+Prerequisites
+Before starting this lab, you should have:
+
+Basic understanding of Ansible concepts (playbooks, inventories, hosts)
+Familiarity with YAML syntax and structure
+Knowledge of Linux command line operations
+Understanding of regular expressions (basic level)
+Completed previous Ansible labs or equivalent experience
+Access to multiple Linux hosts for testing dynamic inventory behavior
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment - no need to build your own virtual machines or configure complex networking.
+
+Your lab environment includes:
+
+1 Ansible Control Node (ansible-controller)
+4 Managed Nodes (web-server-1, web-server-2, db-server-1, app-server-1)
+Pre-installed Ansible AWX Community Edition
+Network connectivity between all nodes
+Task 1: Create Smart Inventories with Filters for Host Selection
+Subtask 1.1: Understanding Smart Inventories
+Smart inventories are dynamic collections of hosts that automatically update based on defined criteria. Unlike static inventories, smart inventories use filters to dynamically include or exclude hosts based on their properties.
+
+Key Benefits:
+
+Dynamic Updates: Automatically adjust as infrastructure changes
+Flexible Targeting: Use complex criteria for host selection
+Reduced Maintenance: No manual inventory updates required
+Scalability: Handle large, changing environments efficiently
+Subtask 1.2: Access Ansible AWX Interface
+Open your web browser and navigate to the AWX interface:
+# The URL will be provided in your lab environment
+# Typically: http://ansible-controller:8080
+Log in with the provided credentials:
+
+Username: admin
+Password: password
+Navigate to Inventories in the left sidebar menu.
+
+Subtask 1.3: Create Base Static Inventory
+Before creating smart inventories, we need a base inventory with properly configured hosts.
+
+Click Add and select Add inventory.
+
+Fill in the inventory details:
+
+Name: Production Infrastructure
+Description: Base inventory for production systems
+Organization: Default
+Click Save.
+
+Navigate to the Hosts tab and add hosts by clicking Add.
+
+Add the first host:
+
+Name: web-server-1
+Description: Production Web Server 1
+Variables:
+server_type: web
+environment: production
+region: us-east
+cpu_cores: 4
+memory_gb: 8
+Add the second host:
+Name: web-server-2
+Description: Production Web Server 2
+Variables:
+server_type: web
+environment: production
+region: us-west
+cpu_cores: 4
+memory_gb: 8
+Add the third host:
+Name: db-server-1
+Description: Production Database Server
+Variables:
+server_type: database
+environment: production
+region: us-east
+cpu_cores: 8
+memory_gb: 16
+Add the fourth host:
+Name: app-server-1
+Description: Production Application Server
+Variables:
+server_type: application
+environment: production
+region: us-central
+cpu_cores: 6
+memory_gb: 12
+Subtask 1.4: Create Your First Smart Inventory
+Navigate back to Inventories and click Add.
+
+Select Add smart inventory.
+
+Configure the smart inventory:
+
+Name: Web Servers Smart Inventory
+Description: Dynamic inventory for all web servers
+Organization: Default
+Smart host filter: server_type:web
+Click Save.
+
+Navigate to the Hosts tab to verify that both web servers are automatically included.
+
+Subtask 1.5: Create Advanced Smart Inventory with Multiple Filters
+Create another smart inventory with more complex filtering:
+
+Name: High Memory Servers
+Description: Servers with 12GB or more memory
+Smart host filter: memory_gb:>=12
+Create a regional smart inventory:
+
+Name: US East Region Servers
+Description: All servers in US East region
+Smart host filter: region:us-east
+Create a combined filter inventory:
+
+Name: Production Web Servers East
+Description: Production web servers in US East
+Smart host filter: server_type:web and region:us-east and environment:production
+Subtask 1.6: Understanding Smart Inventory Filter Syntax
+Smart inventory filters support various operators and syntax patterns:
+
+Basic Operators:
+
+# Exact match
+server_type:web
+
+# Not equal
+server_type:!database
+
+# Greater than or equal
+memory_gb:>=8
+
+# Less than
+cpu_cores:<8
+
+# Contains (for string values)
+hostname:web*
+
+# Regular expressions
+hostname:~web-server-[0-9]+
+Logical Operators:
+
+# AND operation
+server_type:web and environment:production
+
+# OR operation
+server_type:web or server_type:application
+
+# Complex combinations
+(server_type:web or server_type:application) and environment:production
+Subtask 1.7: Create Smart Inventory with Complex Filters
+Create a smart inventory using complex filtering:
+
+Name: Scalable Infrastructure
+Description: High-resource servers for scaling
+Smart host filter: (memory_gb:>=12 or cpu_cores:>=6) and environment:production
+Create a pattern-based smart inventory:
+
+Name: Server Pattern Match
+Description: Servers matching naming pattern
+Smart host filter: name:~.*-server-[0-9]+
+Task 2: Test Dynamic Inventories and Job Targeting
+Subtask 2.1: Create Test Playbooks
+Navigate to Projects and create a new project or use an existing one.
+
+Create a simple test playbook. In your project directory, create test-smart-inventory.yml:
+
+---
+- name: Test Smart Inventory Targeting
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Display host information
+      debug:
+        msg: |
+          Host: {{ inventory_hostname }}
+          Server Type: {{ server_type | default('undefined') }}
+          Environment: {{ environment | default('undefined') }}
+          Region: {{ region | default('undefined') }}
+          CPU Cores: {{ cpu_cores | default('undefined') }}
+          Memory GB: {{ memory_gb | default('undefined') }}
+
+    - name: Create identification file
+      file:
+        path: "/tmp/smart-inventory-test-{{ server_type | default('unknown') }}.txt"
+        state: touch
+        mode: '0644'
+      become: yes
+
+    - name: Write host details to file
+      lineinfile:
+        path: "/tmp/smart-inventory-test-{{ server_type | default('unknown') }}.txt"
+        line: "{{ inventory_hostname }} - {{ ansible_date_time.iso8601 }}"
+        create: yes
+      become: yes
+Create another playbook for testing specific server types, web-server-config.yml:
+---
+- name: Configure Web Servers
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Verify this is a web server
+      assert:
+        that:
+          - server_type == "web"
+        fail_msg: "This playbook should only run on web servers"
+        success_msg: "Confirmed: This is a web server"
+
+    - name: Install web server package (simulation)
+      debug:
+        msg: "Installing nginx on {{ inventory_hostname }}"
+
+    - name: Configure web server
+      copy:
+        content: |
+          # Web Server Configuration
+          Server: {{ inventory_hostname }}
+          Type: {{ server_type }}
+          Region: {{ region }}
+          Configured: {{ ansible_date_time.iso8601 }}
+        dest: "/tmp/web-config-{{ inventory_hostname }}.conf"
+      become: yes
+
+    - name: Display web server status
+      debug:
+        msg: "Web server {{ inventory_hostname }} configured successfully"
+Subtask 2.2: Create Job Templates for Smart Inventories
+Navigate to Templates and click Add > Add job template.
+
+Create the first job template:
+
+Name: Test All Smart Inventory
+Job Type: Run
+Inventory: Web Servers Smart Inventory
+Project: Select your project
+Playbook: test-smart-inventory.yml
+Credentials: Select appropriate machine credentials
+Create a second job template:
+
+Name: Configure Web Servers
+Job Type: Run
+Inventory: Web Servers Smart Inventory
+Project: Select your project
+Playbook: web-server-config.yml
+Credentials: Select appropriate machine credentials
+Create a job template for high-memory servers:
+
+Name: High Memory Server Check
+Job Type: Run
+Inventory: High Memory Servers
+Project: Select your project
+Playbook: test-smart-inventory.yml
+Credentials: Select appropriate machine credentials
+Subtask 2.3: Execute Jobs Against Smart Inventories
+Test Web Servers Smart Inventory:
+
+Navigate to Templates
+Click the rocket icon next to Test All Smart Inventory
+Monitor the job execution
+Verify it runs only on web servers (web-server-1 and web-server-2)
+Test High Memory Servers:
+
+Launch the High Memory Server Check job template
+Verify it targets only servers with 12GB+ memory (db-server-1 and app-server-1)
+Test Regional Targeting:
+
+Create a quick job template for US East Region Servers
+Run the test playbook
+Confirm it only targets hosts in the us-east region
+Subtask 2.4: Validate Dynamic Behavior
+Add a New Host to Test Dynamic Updates:
+Go to your base inventory Production Infrastructure
+Add a new host:
+Name: web-server-3
+Description: New Production Web Server
+Variables:
+server_type: web
+environment: production
+region: us-west
+cpu_cores: 4
+memory_gb: 8
+Verify Smart Inventory Updates:
+
+Navigate to Web Servers Smart Inventory
+Check the Hosts tab
+Confirm that web-server-3 is automatically included
+Test Job Execution with New Host:
+
+Run the Test All Smart Inventory job template again
+Verify that the new web server is included in the execution
+Subtask 2.5: Test Filter Modifications
+Modify Smart Inventory Filter:
+
+Edit the Web Servers Smart Inventory
+Change the filter to: server_type:web and region:us-east
+Save the changes
+Verify Filter Impact:
+
+Check the Hosts tab
+Confirm only web-server-1 is now included (us-east web server)
+Test Modified Targeting:
+
+Run the job template again
+Verify it now only targets the single host matching the new criteria
+Subtask 2.6: Advanced Testing Scenarios
+Create Time-Based Smart Inventory:
+
+Add a timestamp variable to some hosts
+Create a smart inventory that filters based on recent additions
+Test Exclusion Filters:
+
+Create a smart inventory with: environment:production and server_type:!database
+Verify it includes all production servers except databases
+Performance Testing:
+
+Create a smart inventory targeting all hosts: environment:production
+Run a simple playbook to test performance with larger host groups
+Troubleshooting Common Issues
+Issue 1: Smart Inventory Shows No Hosts
+Symptoms: Smart inventory appears empty despite having matching hosts.
+
+Solutions:
+
+# Check filter syntax
+# Ensure variables are properly defined on hosts
+# Verify case sensitivity in filters
+# Test with simpler filters first
+Example Fix:
+
+Original filter: Server_Type:Web (incorrect case)
+Corrected filter: server_type:web
+Issue 2: Job Fails on Smart Inventory
+Symptoms: Jobs fail when run against smart inventories but work with static inventories.
+
+Solutions:
+
+Verify all hosts in the smart inventory are accessible
+Check that host variables are properly set
+Ensure playbook logic handles dynamic host sets
+Issue 3: Filter Not Working as Expected
+Symptoms: Smart inventory includes unexpected hosts or excludes expected ones.
+
+Debugging Steps:
+
+Test filters incrementally
+Use the AWX interface to preview filter results
+Check host variable definitions
+Verify operator syntax
+Advanced Smart Inventory Patterns
+Pattern 1: Environment-Based Inventories
+# Development environment
+environment:development
+
+# Non-production environments
+environment:!production
+
+# Multiple environments
+environment:development or environment:staging
+Pattern 2: Resource-Based Inventories
+# High-performance servers
+cpu_cores:>=8 and memory_gb:>=16
+
+# Low-resource servers
+cpu_cores:<=4 and memory_gb:<=8
+
+# Balanced servers
+cpu_cores:>=4 and cpu_cores:<=8 and memory_gb:>=8 and memory_gb:<=16
+Pattern 3: Location-Based Inventories
+# US regions
+region:~us-.*
+
+# East coast regions
+region:us-east or region:us-northeast
+
+# Exclude specific regions
+region:!us-west
+Best Practices for Smart Inventories
+1. Naming Conventions
+Use descriptive names that indicate the filter criteria
+Include the purpose or use case in the name
+Maintain consistency across your organization
+2. Filter Design
+Start with simple filters and add complexity gradually
+Test filters thoroughly before using in production
+Document complex filter logic for team understanding
+3. Host Variable Management
+Establish consistent variable naming conventions
+Ensure all relevant hosts have required variables
+Use meaningful variable values that support filtering
+4. Performance Considerations
+Avoid overly complex filters that impact performance
+Consider the frequency of inventory updates
+Monitor job execution times with large smart inventories
+Conclusion
+In this lab, you have successfully:
+
+Created multiple smart inventories with various filter criteria, demonstrating how dynamic inventories automatically adjust based on host properties
+Implemented complex filtering logic using operators, logical combinations, and pattern matching to precisely target specific host groups
+Tested dynamic inventory behavior by executing jobs against smart inventories and validating that the correct hosts are targeted
+Verified real-time updates by adding new hosts and confirming they automatically appear in appropriate smart inventories
+Explored advanced filtering patterns for different use cases including environment-based, resource-based, and location-based targeting
+Why This Matters:
+
+Smart inventories are crucial for managing large, dynamic infrastructure environments. They eliminate the manual overhead of maintaining static inventory files and ensure that automation jobs always target the most current and appropriate systems. This capability is essential for:
+
+Cloud environments where resources are frequently created and destroyed
+Auto-scaling scenarios where the number of hosts changes dynamically
+Multi-environment deployments where you need to target specific subsets of infrastructure
+Compliance and governance where you need to ensure jobs only run on appropriate systems
+By mastering smart inventories, you can build more resilient, scalable, and maintainable automation solutions that adapt automatically to changing infrastructure requirements. This skill is particularly valuable for organizations pursuing Infrastructure as Code practices and cloud-native architectures.
+
+The techniques you've learned in this lab form the foundation for advanced Ansible automation scenarios and are essential knowledge for the Red Hat Ansible Automation Platform certification path.
