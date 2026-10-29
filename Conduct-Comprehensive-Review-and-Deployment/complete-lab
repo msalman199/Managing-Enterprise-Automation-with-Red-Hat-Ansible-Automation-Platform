@@ -1,0 +1,502 @@
+Lab 20: Conduct Comprehensive Review and Deployment
+Objectives
+
+By the end of this lab, students will be able to:
+
+    Configure and deploy AWX (the open-source upstream project for Red Hat Ansible Automation Platform)
+    Set up inventories for multi-environment infrastructure management
+    Create job templates and workflow templates for automated deployment
+    Build and execute Ansible playbooks that provision and configure web and database servers
+    Apply enterprise automation practices, including scheduled maintenance and backup jobs
+
+Prerequisites
+
+Before starting this lab, students should have:
+
+    Basic understanding of Linux command line operations
+    Familiarity with YAML syntax and structure
+    Knowledge of SSH key-based authentication
+    Previous experience with Ansible playbooks and modules
+    Basic understanding of containerization concepts (Docker/Podman)
+
+This lab uses a controller node and managed nodes provided in your isolated practice environment. Install the following on the controller node before starting:
+
+sudo dnf install -y git curl python3-pip
+sudo dnf install -y docker
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+newgrp docker
+
+Lab Environment Setup
+
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment. No need to build your own virtual machines or configure basic networking.
+
+Your lab environment includes:
+
+    1 controller node (automation-controller)
+    2 managed nodes (web-server-1, database-server)
+    Pre-installed Ansible and required dependencies
+    Network connectivity between all nodes
+
+All work in this lab is performed inside your assigned, isolated practice environment. No production systems or external targets are involved.
+Task 1: Deploy AWX and Configure Core Inventory
+Subtask 1.1: Deploy AWX Using the AWX Operator Compose Method
+
+AWX is the open-source project from which Red Hat Ansible Automation Platform's controller component is derived. We deploy it using the community-supported awx-on-docker compose approach so the whole stack runs in containers on a single controller node.
+Step 1: Clone the deployment repository
+
+git clone https://github.com/kurokobo/awx-on-docker.git
+cd awx-on-docker
+
+Step 2: Configure environment variables
+
+cat > .env << 'EOF'
+AWX_ADMIN_USER=admin
+AWX_ADMIN_PASSWORD=Password123!
+AWX_POSTGRES_PASSWORD=awxpostgrespass
+AWX_HOST_PORT=8080
+EOF
+
+Step 3: Start the AWX stack
+
+docker compose up -d
+sleep 60
+docker compose ps
+
+You should see containers for awx-web, awx-task, and postgres all reporting Up (running) status.
+Step 4: Access the AWX web interface
+
+Open a browser and navigate to http://<controller-ip>:8080. Log in with:
+
+    Username: admin
+    Password: Password123!
+
+Deliverable: A screenshot or terminal output of docker compose ps showing all three services running, plus a successful login to the AWX dashboard.
+Subtask 1.2: Create the Production Inventory File
+Step 1: Create the inventory directory and file
+
+mkdir -p /opt/ansible-inventories
+cat > /opt/ansible-inventories/production.yml << 'EOF'
+all:
+  children:
+    webservers:
+      hosts:
+        web-server-1:
+          ansible_host: 192.168.1.10
+          ansible_user: ansible
+          server_role: primary
+      vars:
+        http_port: 80
+    databases:
+      hosts:
+        database-server:
+          ansible_host: 192.168.1.20
+          ansible_user: ansible
+          db_type: postgresql
+      vars:
+        db_port: 5432
+EOF
+
+Step 2: Validate the inventory syntax
+
+ansible-inventory -i /opt/ansible-inventories/production.yml --list
+
+The output should be valid JSON containing webservers, databases, and a _meta.hostvars section listing both hosts with the variables you defined.
+Step 3: Test connectivity to managed nodes
+
+ansible -i /opt/ansible-inventories/production.yml all -m ping
+
+Expected result: web-server-1 and database-server both return "ping": "pong" with a SUCCESS status. If SSH keys are not yet distributed, complete Task 3, Subtask 3.1 first, then re-run this command.
+
+Deliverable: Successful JSON output from ansible-inventory --list and two SUCCESS responses from ansible ... -m ping.
+Task 2: Build Playbooks and Configure AWX Job Templates
+Subtask 2.1: Create the Web Server Deployment Playbook
+Step 1: Create the playbook directory structure
+
+mkdir -p /opt/ansible-playbooks/templates
+
+Step 2: Write the web server playbook
+
+cat > /opt/ansible-playbooks/deploy-webserver.yml << 'EOF'
+---
+- name: Deploy Web Server Infrastructure
+  hosts: webservers
+  become: yes
+  vars:
+    web_packages:
+      - httpd
+    web_service: httpd
+
+  tasks:
+    - name: Install web server packages
+      dnf:
+        name: "{{ web_packages }}"
+        state: present
+
+    - name: Deploy web application index page
+      template:
+        src: index.html.j2
+        dest: /var/www/html/index.html
+        owner: apache
+        group: apache
+        mode: '0644'
+      notify: restart httpd
+
+    - name: Start and enable web service
+      systemd:
+        name: "{{ web_service }}"
+        state: started
+        enabled: yes
+
+    - name: Open firewall for HTTP
+      firewalld:
+        service: http
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: ansible_facts.services['firewalld.service'] is defined
+
+  handlers:
+    - name: restart httpd
+      systemd:
+        name: httpd
+        state: restarted
+EOF
+
+Step 3: Create the index page template
+
+cat > /opt/ansible-playbooks/templates/index.html.j2 << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ inventory_hostname }} - Lab Server</title>
+</head>
+<body>
+    <h1>Welcome to {{ inventory_hostname }}</h1>
+    <p>Server Role: {{ server_role | default('undefined') }}</p>
+    <p>Managed by: Ansible Automation Platform</p>
+</body>
+</html>
+EOF
+
+Deliverable: Running ansible-playbook -i /opt/ansible-inventories/production.yml /opt/ansible-playbooks/deploy-webserver.yml --syntax-check returns playbook: /opt/ansible-playbooks/deploy-webserver.yml with no errors.
+Subtask 2.2: Create the Database Deployment Playbook
+Step 1: Write the database playbook
+
+cat > /opt/ansible-playbooks/deploy-database.yml << 'EOF'
+---
+- name: Deploy Database Server
+  hosts: databases
+  become: yes
+  vars:
+    db_packages:
+      - postgresql-server
+      - postgresql-contrib
+      - python3-psycopg2
+    db_name: appdb
+    db_user: appuser
+    db_password: "{{ vault_db_password | default('ChangeMe123') }}"
+
+  tasks:
+    - name: Install PostgreSQL packages
+      dnf:
+        name: "{{ db_packages }}"
+        state: present
+
+    - name: Initialize PostgreSQL database
+      command: postgresql-setup --initdb
+      args:
+        creates: /var/lib/pgsql/data/postgresql.conf
+
+    - name: Start and enable PostgreSQL
+      systemd:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Configure PostgreSQL authentication for local connections
+      lineinfile:
+        path: /var/lib/pgsql/data/pg_hba.conf
+        regexp: '^local\s+all\s+all\s+peer'
+        line: 'local   all             all                                     md5'
+      notify: restart postgresql
+
+    - name: Create application database
+      postgresql_db:
+        name: "{{ db_name }}"
+        state: present
+      become_user: postgres
+
+    - name: Create application database user
+      postgresql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        db: "{{ db_name }}"
+        priv: ALL
+        state: present
+      become_user: postgres
+
+    - name: Open firewall for PostgreSQL
+      firewalld:
+        port: 5432/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: ansible_facts.services['firewalld.service'] is defined
+
+  handlers:
+    - name: restart postgresql
+      systemd:
+        name: postgresql
+        state: restarted
+EOF
+
+Deliverable: Running ansible-playbook -i /opt/ansible-inventories/production.yml /opt/ansible-playbooks/deploy-database.yml --syntax-check returns no errors.
+Subtask 2.3: Configure AWX Project, Inventory, and Job Templates
+Step 1: Create a Project in AWX
+
+    Navigate to Resources -> Projects.
+    Click Add.
+    Fill in:
+        Name: Production Deployment
+        Organization: Default
+        Source Control Type: Manual
+        Playbook Directory: /opt/ansible-playbooks (select from the dropdown after the directory is synced into the AWX project base path, or use Git if you push these files to a repository)
+
+Step 2: Create the Inventory and Hosts in AWX
+
+    Navigate to Resources -> Inventories -> Add -> Add Inventory.
+    Set Name: Production Infrastructure, Organization: Default.
+    Open the inventory, go to the Hosts tab, and add:
+
+web-server-1
+
+ansible_host: 192.168.1.10
+ansible_user: ansible
+server_role: primary
+
+database-server
+
+ansible_host: 192.168.1.20
+ansible_user: ansible
+db_type: postgresql
+
+    Go to the Groups tab and create groups webservers and databases, then assign web-server-1 to webservers and database-server to databases.
+
+Step 3: Create the SSH Credential
+
+    Navigate to Resources -> Credentials -> Add.
+    Set:
+        Name: Ansible SSH Key
+        Credential Type: Machine
+        Username: ansible
+        SSH Private Key: paste the contents of the private key generated in Task 3, Subtask 3.1
+
+Step 4: Create Job Templates
+
+Web Server Deployment Template:
+
+    Navigate to Resources -> Templates -> Add -> Add Job Template.
+    Configure:
+        Name: Deploy Web Servers
+        Job Type: Run
+        Inventory: Production Infrastructure
+        Project: Production Deployment
+        Playbook: deploy-webserver.yml
+        Credentials: Ansible SSH Key
+        Limit: webservers
+        Privilege Escalation: enabled (check the "Privilege Escalation" box)
+        Privilege Escalation Method: sudo (ensure the ansible SSH user has passwordless sudo access configured with visudo on the managed nodes, e.g. ansible ALL=(ALL) NOPASSWD:ALL)
+
+Database Deployment Template:
+
+    Create another job template:
+        Name: Deploy Database Server
+        Job Type: Run
+        Inventory: Production Infrastructure
+        Project: Production Deployment
+        Playbook: deploy-database.yml
+        Credentials: Ansible SSH Key
+        Limit: databases
+        Privilege Escalation: enabled
+        Privilege Escalation Method: sudo (same passwordless sudo requirement as above)
+
+Deliverable: Both job templates appear in the Templates list, and launching Deploy Web Servers completes with status Successful (green checkmark) in the Jobs view.
+Subtask 2.4: Create a Workflow Template
+Step 1: Create the workflow
+
+    Navigate to Resources -> Templates -> Add -> Add Workflow Template.
+    Configure:
+        Name: Full Infrastructure Deployment
+        Organization: Default
+        Inventory: Production Infrastructure
+
+Step 2: Build the workflow graph
+
+    Click Visualizer to launch the workflow editor.
+    Add a start node: Deploy Database Server.
+    Add a node on success: Deploy Web Servers.
+    Save the workflow.
+
+Step 3: Launch and verify
+
+    Click Launch on the Full Infrastructure Deployment workflow.
+    Watch the workflow graph in real time; both nodes should turn green in sequence.
+
+Deliverable: The workflow job view shows both nodes with status Successful, executed in the order Database -> Web Server.
+Task 3: Provision Hosts and Implement Operational Playbooks
+Subtask 3.1: Prepare SSH Access for Managed Nodes
+Step 1: Generate an SSH key pair on the controller
+
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/ansible_key -N ""
+
+Step 2: Copy the public key to each managed node
+
+ssh-copy-id -i ~/.ssh/ansible_key.pub ansible@192.168.1.10
+ssh-copy-id -i ~/.ssh/ansible_key.pub ansible@192.168.1.20
+
+Step 3: Confirm passwordless SSH and sudo
+
+ssh -i ~/.ssh/ansible_key ansible@192.168.1.10 "sudo whoami"
+
+Expected output: root, confirming both key-based SSH login and passwordless sudo work correctly. Paste the private key content (cat ~/.ssh/ansible_key) into the AWX credential created in Task 2, Subtask 2.3, Step 3.
+
+Deliverable: The sudo whoami command returns root with no password prompt, for both managed nodes.
+Subtask 3.2: Create a Scheduled Configuration Update Playbook
+Step 1: Write the configuration update playbook
+
+cat > /opt/ansible-playbooks/update-config.yml << 'EOF'
+---
+- name: Update System Configuration
+  hosts: all
+  become: yes
+  vars:
+    log_retention_days: 30
+
+  tasks:
+    - name: Update system packages
+      dnf:
+        name: "*"
+        state: latest
+        update_cache: yes
+
+    - name: Set timezone
+      timezone:
+        name: UTC
+
+    - name: Configure log rotation for application logs
+      template:
+        src: logrotate.conf.j2
+        dest: /etc/logrotate.d/application
+EOF
+
+Step 2: Create the logrotate template
+
+cat > /opt/ansible-playbooks/templates/logrotate.conf.j2 << 'EOF'
+/var/log/httpd/*log {
+    daily
+    rotate {{ log_retention_days }}
+    missingok
+    notifempty
+    sharedscripts
+    compress
+    delaycompress
+    postrotate
+        /bin/systemctl reload httpd.service > /dev/null 2>/dev/null || true
+    endscript
+}
+EOF
+
+Step 3: Create a job template and schedule it in AWX
+
+    Create a job template named System Configuration Update pointing to update-config.yml, using the Production Infrastructure inventory, Ansible SSH Key credential, and sudo privilege escalation enabled.
+    Open the template, go to the Schedules tab, and add a schedule set to run Weekly.
+
+Deliverable: The Schedules tab shows one active weekly schedule for System Configuration Update.
+Subtask 3.3: Implement a Backup Playbook
+Step 1: Write the complete backup playbook
+
+cat > /opt/ansible-playbooks/backup-systems.yml << 'EOF'
+---
+- name: Backup Critical Systems
+  hosts: all
+  become: yes
+  vars:
+    backup_dir: /opt/backups
+    retention_days: 7
+
+  tasks:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}/{{ inventory_hostname }}"
+        state: directory
+        mode: '0755'
+
+    - name: Backup web server configuration and content
+      archive:
+        path:
+          - /etc/httpd/
+          - /var/www/html/
+        dest: "{{ backup_dir }}/{{ inventory_hostname }}/web-config-{{ ansible_date_time.date }}.tar.gz"
+        format: gz
+      when: inventory_hostname in groups['webservers']
+
+    - name: Dump application database
+      postgresql_db:
+        name: appdb
+        state: dump
+        target: "{{ backup_dir }}/{{ inventory_hostname }}/database-{{ ansible_date_time.date }}.sql"
+      become_user: postgres
+      when: inventory_hostname in groups['databases']
+
+    - name: Find backup files older than the retention period
+      find:
+        paths: "{{ backup_dir }}/{{ inventory_hostname }}"
+        age: "{{ retention_days }}d"
+        file_type: file
+      register: old_backups
+
+    - name: Remove backups older than the retention period
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_backups.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Report backup completion
+      debug:
+        msg: "Backup completed for {{ inventory_hostname }} on {{ ansible_date_time.date }}. Old backups removed: {{ old_backups.files | length }}"
+EOF
+
+Step 2: Validate the playbook
+
+ansible-playbook -i /opt/ansible-inventories/production.yml /opt/ansible-playbooks/backup-systems.yml --syntax-check
+
+Expected output: playbook: /opt/ansible-playbooks/backup-systems.yml with no syntax errors.
+Step 3: Run the backup playbook against the managed nodes
+
+ansible-playbook -i /opt/ansible-inventories/production.yml /opt/ansible-playbooks/backup-systems.yml
+
+Expected result: a PLAY RECAP showing ok and changed counts greater than zero for both hosts, with failed=0. Confirm the archive and dump files exist:
+
+ls -lh /opt/backups/web-server-1/
+ls -lh /opt/backups/database-server/
+
+You should see a .tar.gz file on the web server and a .sql file on the database server, each timestamped with the current date.
+
+Deliverable: A successful PLAY RECAP with zero failures, and backup files present in /opt/backups/<hostname>/ on both managed nodes.
+Expected Outcomes
+
+    A running AWX instance accessible via web browser, with a project, inventory, credentials, job templates, and a workflow template configured
+    Two working playbooks (web server and database deployment) that execute successfully both from the command line and through AWX job templates
+    A scheduled configuration update job and a verified backup playbook that archives configuration and database content with automatic retention cleanup
+
+Troubleshooting
+
+Issue 1: AWX containers fail to start or awx-web keeps restarting. Diagnostic hint: run docker compose logs awx-task and check for database migration errors; this usually indicates the Postgres container was not fully initialized before awx-task started, or the .env password values do not match between services.
+
+Issue 2: Ansible -m ping fails with UNREACHABLE against a managed node. Diagnostic hint: run ssh -i ~/.ssh/ansible_key -vvv ansible@<host> directly to isolate whether this is an SSH key permission issue (key file should be chmod 600), a firewall issue, or an incorrect ansible_host value in the inventory.
+Conclusion
+
+In this lab, you deployed a working AWX automation controller using containers, built a multi-group Ansible inventory, and wrote playbooks that provision a web server and a PostgreSQL database server. You then configured AWX projects, credentials, job templates, and a workflow template to orchestrate the deployment through a web interface, and implemented operational playbooks for scheduled configuration updates and backups with retention cleanup. Through this process you practiced core Ansible Automation Platform concepts including inventories, privilege escalation, job templates, and workflow orchestration that are directly applicable to enterprise infrastructure automation. As a next step, consider extending the workflow with approval nodes, integrating a real source control backend for the project, and adding Ansible Vault to encrypt the database password variable instead of using a plaintext default.
