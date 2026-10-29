@@ -1,0 +1,52 @@
+!
+! Router Configuration Template
+! Device: {{ hostname }}
+! Model: {{ device_model | default('Unknown') }}
+!
+hostname {{ hostname }}
+!
+! Interface Configuration
+{% for interface in interfaces %}
+interface {{ interface.name }}
+ description {{ interface.description }}
+{% if interface.ip_address is defined %}
+ ip address {{ interface.ip_address }} {{ interface.subnet_mask }}
+{% endif %}
+{% if interface.type == 'wan' %}
+ ip nat outside
+{% elif interface.type == 'lan' %}
+ ip nat inside
+{% endif %}
+ no shutdown
+{% endfor %}
+!
+{% if routing.protocol == 'ospf' %}
+! OSPF Configuration
+router ospf {{ routing.process_id }}
+{% for network in routing.networks %}
+ network {{ network.network }} {{ network.wildcard }} area {{ network.area }}
+{% endfor %}
+{% elif routing.protocol == 'static' %}
+! Static Routes
+{% for route in routing.static_routes %}
+ip route {{ route.destination }} {{ route.mask }} {{ route.next_hop }}
+{% endfor %}
+{% endif %}
+!
+{% if nat is defined and nat.enabled %}
+! NAT Configuration
+{% for rule in nat.rules %}
+ip nat {{ rule.type }} {{ rule.source }} {{ rule.destination }}
+{% endfor %}
+{% endif %}
+!
+! Access Control Lists
+{% for acl in access_lists %}
+{% if acl.type == 'standard' %}
+access-list {{ acl.number }} {{ acl.action }} {{ acl.source }}
+{% elif acl.type == 'extended' %}
+access-list {{ acl.number }} {{ acl.action }} {{ acl.protocol }} {{ acl.source }} {{ acl.destination }}
+{% endif %}
+{% endfor %}
+!
+end

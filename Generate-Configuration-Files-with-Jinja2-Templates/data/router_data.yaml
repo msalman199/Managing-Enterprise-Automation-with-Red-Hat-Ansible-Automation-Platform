@@ -1,0 +1,38 @@
+hostname: "RTR-EDGE-01"
+device_model: "Cisco ISR 4321"
+
+interfaces:
+  - name: "GigabitEthernet0/0/0"
+    description: "WAN Connection to ISP"
+    type: "wan"
+    ip_address: "203.0.113.10"
+    subnet_mask: "255.255.255.252"
+  - name: "GigabitEthernet0/0/1"
+    description: "LAN Connection"
+    type: "lan"
+    ip_address: "192.168.1.1"
+    subnet_mask: "255.255.255.0"
+
+routing:
+  protocol: "ospf"
+  process_id: 1
+  networks:
+    - network: "192.168.1.0"
+      wildcard: "0.0.0.255"
+      area: 0
+    - network: "203.0.113.8"
+      wildcard: "0.0.0.3"
+      area: 0
+
+nat:
+  enabled: true
+  rules:
+    - type: "inside source list"
+      source: "1"
+      destination: "interface GigabitEthernet0/0/0 overload"
+
+access_lists:
+  - number: 1
+    type: "standard"
+    action: "permit"
+    source: "192.168.1.0 0.0.0.255"

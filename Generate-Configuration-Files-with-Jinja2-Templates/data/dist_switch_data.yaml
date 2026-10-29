@@ -1,0 +1,33 @@
+hostname: "SW-DIST-02"
+mgmt_interface: "GigabitEthernet0/0"
+mgmt_ip: "192.168.1.11"
+mgmt_subnet: "255.255.255.0"
+domain_name: "company.local"
+admin_user: "netadmin"
+admin_password: "DistSwitch2024!"
+
+vlans:
+  - id: 10
+    name: "SALES"
+  - id: 20
+    name: "ENGINEERING"
+  - id: 30
+    name: "GUEST"
+  - id: 40
+    name: "SERVERS"
+  - id: 99
+    name: "MANAGEMENT"
+
+interfaces:
+  - name: "GigabitEthernet0/1"
+    description: "Uplink to Core Switch"
+    type: "trunk"
+    allowed_vlans: [10, 20, 30, 40, 99]
+  - name: "GigabitEthernet0/2"
+    description: "Connection to Server Farm"
+    type: "access"
+    vlan: 40
+  - name: "GigabitEthernet0/3"
+    description: "Guest Network Access"
+    type: "access"
+    vlan: 30

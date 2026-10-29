@@ -1,0 +1,37 @@
+hostname: "RTR-BRANCH-01"
+device_model: "Cisco ISR 1941"
+
+interfaces:
+  - name: "GigabitEthernet0/0"
+    description: "WAN Connection to HQ"
+    type: "wan"
+    ip_address: "10.0.1.2"
+    subnet_mask: "255.255.255.252"
+  - name: "GigabitEthernet0/1"
+    description: "Branch LAN"
+    type: "lan"
+    ip_address: "192.168.100.1"
+    subnet_mask: "255.255.255.0"
+
+routing:
+  protocol: "static"
+  static_routes:
+    - destination: "0.0.0.0"
+      mask: "0.0.0.0"
+      next_hop: "10.0.1.1"
+    - destination: "192.168.1.0"
+      mask: "255.255.255.0"
+      next_hop: "10.0.1.1"
+
+nat:
+  enabled: true
+  rules:
+    - type: "inside source list"
+      source: "100"
+      destination: "interface GigabitEthernet0/0 overload"
+
+access_lists:
+  - number: 100
+    type: "standard"
+    action: "permit"
+    source: "192.168.100.0 0.0.0.255"

@@ -1,0 +1,31 @@
+hostname: "SW-CORE-01"
+mgmt_interface: "GigabitEthernet0/0"
+mgmt_ip: "192.168.1.10"
+mgmt_subnet: "255.255.255.0"
+domain_name: "company.local"
+admin_user: "admin"
+admin_password: "SecurePass123!"
+
+vlans:
+  - id: 10
+    name: "SALES"
+  - id: 20
+    name: "ENGINEERING"
+  - id: 30
+    name: "GUEST"
+  - id: 99
+    name: "MANAGEMENT"
+
+interfaces:
+  - name: "GigabitEthernet0/1"
+    description: "Connection to Sales Department"
+    type: "access"
+    vlan: 10
+  - name: "GigabitEthernet0/2"
+    description: "Connection to Engineering Department"
+    type: "access"
+    vlan: 20
+  - name: "GigabitEthernet0/24"
+    description: "Trunk to Distribution Switch"
+    type: "trunk"
+    allowed_vlans: [10, 20, 30, 99]

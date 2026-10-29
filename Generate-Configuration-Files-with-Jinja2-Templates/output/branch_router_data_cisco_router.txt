@@ -1,0 +1,30 @@
+!
+! Router Configuration Template
+! Device: RTR-BRANCH-01
+! Model: Cisco ISR 1941
+!
+hostname RTR-BRANCH-01
+!
+! Interface Configuration
+interface GigabitEthernet0/0
+ description WAN Connection to HQ
+ ip address 10.0.1.2 255.255.255.252
+ ip nat outside
+ no shutdown
+interface GigabitEthernet0/1
+ description Branch LAN
+ ip address 192.168.100.1 255.255.255.0
+ ip nat inside
+ no shutdown
+!
+! Static Routes
+ip route 0.0.0.0 0.0.0.0 10.0.1.1
+ip route 192.168.1.0 255.255.255.0 10.0.1.1
+!
+! NAT Configuration
+ip nat inside source list 100 interface GigabitEthernet0/0 overload
+!
+! Access Control Lists
+access-list 100 permit 192.168.100.0 0.0.0.255
+!
+end
