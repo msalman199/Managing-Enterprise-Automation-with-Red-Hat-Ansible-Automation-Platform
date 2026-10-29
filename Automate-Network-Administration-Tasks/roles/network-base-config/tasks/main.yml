@@ -1,0 +1,25 @@
+---
+# tasks file for roles/network-base-config
+---
+- name: Configure hostname
+  cisco.ios.ios_config:
+    lines:
+      - "hostname {{ inventory_hostname }}"
+
+- name: Configure domain name
+  cisco.ios.ios_config:
+    lines:
+      - "ip domain-name {{ domain_name | default('lab.local') }}"
+
+- name: Configure NTP servers
+  cisco.ios.ios_config:
+    lines:
+      - "ntp server {{ item }}"
+  loop: "{{ ntp_servers | default(['pool.ntp.org']) }}"
+
+- name: Configure logging
+  cisco.ios.ios_config:
+    lines:
+      - "logging buffered 16384"
+      - "logging console warnings"
+      - "service timestamps log datetime msec"

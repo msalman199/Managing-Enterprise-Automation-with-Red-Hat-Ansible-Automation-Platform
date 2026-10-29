@@ -1,0 +1,55 @@
+---
+- name: Validate Network Configuration
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  
+  tasks:
+    - name: Check OSPF neighbors (routers only)
+      cisco.ios.ios_command:
+        commands:
+          - show ip ospf neighbor
+      register: ospf_neighbors
+      when: "'routers' in group_names"
+
+    - name: Display OSPF neighbors
+      debug:
+        var: ospf_neighbors.stdout_lines
+      when: "'routers' in group_names"
+
+    - name: Check VLAN status (switches only)
+      cisco.ios.ios_command:
+        commands:
+          - show vlan brief
+      register: vlan_status
+      when: "'switches' in group_names"
+
+    - name: Display VLAN status
+      debug:
+        var: vlan_status.stdout_lines
+      when: "'switches' in group_names"
+
+    - name: Check interface status
+      cisco.ios.ios_command:
+        commands:
+          - show ip interface brief
+      register: interface_brief
+
+    - name: Verify interface configuration
+      debug:
+        var: interface_brief.stdout_lines
+
+    - name: Test connectivity between devices
+      cisco.ios.ios_ping:
+        dest: "{{ hostvars[item]['ansible_host'] }}"
+        count: 3
+      register: ping_results
+      loop: "{{ groups['all'] }}"
+      when: item != inventory_hostname
+      ignore_errors: yes
+
+    - name: Display connectivity results
+      debug:
+        msg: "Ping to {{ item.item }}: {{ 'SUCCESS' if item.packet_loss == '0%' else 'FAILED' }}"
+      loop: "{{ ping_results.results }}"
+      when: ping_results.results is defined

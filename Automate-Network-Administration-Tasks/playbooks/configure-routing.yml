@@ -1,0 +1,51 @@
+---
+- name: Configure OSPF Routing
+  hosts: routers
+  gather_facts: no
+  connection: network_cli
+  
+  vars:
+    ospf_config:
+      process_id: 1
+      router_id_map:
+        router1: "1.1.1.1"
+        router2: "2.2.2.2"
+      networks:
+        router1:
+          - network: "192.168.10.0"
+            wildcard: "0.0.0.255"
+            area: 0
+          - network: "192.168.20.0"
+            wildcard: "0.0.0.255"
+            area: 0
+          - network: "10.0.0.0"
+            wildcard: "0.0.0.3"
+            area: 0
+        router2:
+          - network: "192.168.30.0"
+            wildcard: "0.0.0.255"
+            area: 0
+          - network: "192.168.99.0"
+            wildcard: "0.0.0.255"
+            area: 0
+          - network: "10.0.0.0"
+            wildcard: "0.0.0.3"
+            area: 0
+
+  tasks:
+    - name: Configure OSPF process
+      cisco.ios.ios_config:
+        lines:
+          - "router ospf {{ ospf_config.process_id }}"
+          - "router-id {{ ospf_config.router_id_map[inventory_hostname] }}"
+          - "log-adjacency-changes"
+        parents: []
+
+    - name: Configure OSPF networks
+      cisco.ios.ios_config:
+        lines:
+          - "network {{ item.network }} {{ item.wildcard }} area {{ item.area }}"
+        parents:
+          - "router ospf {{ ospf_config.process_id }}"
+      loop: "{{ ospf_config.networks[inventory_hostname] }}"
+      when: inventory_hostname in ospf_config.networks

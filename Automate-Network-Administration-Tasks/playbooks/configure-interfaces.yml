@@ -1,0 +1,77 @@
+---
+- name: Configure Router Interfaces
+  hosts: routers
+  gather_facts: no
+  connection: network_cli
+  
+  vars:
+    router_interfaces:
+      router1:
+        - name: GigabitEthernet0/0
+          ipv4: 192.168.10.1/24
+          description: "LAN Interface - SALES VLAN"
+        - name: GigabitEthernet0/1
+          ipv4: 192.168.20.1/24
+          description: "LAN Interface - ENGINEERING VLAN"
+        - name: Serial0/0/0
+          ipv4: 10.0.0.1/30
+          description: "WAN Interface to Router2"
+      router2:
+        - name: GigabitEthernet0/0
+          ipv4: 192.168.30.1/24
+          description: "LAN Interface - HR VLAN"
+        - name: GigabitEthernet0/1
+          ipv4: 192.168.99.1/24
+          description: "Management Interface"
+        - name: Serial0/0/0
+          ipv4: 10.0.0.2/30
+          description: "WAN Interface to Router1"
+
+  tasks:
+    - name: Configure router interfaces
+      cisco.ios.ios_l3_interfaces:
+        config: "{{ router_interfaces[inventory_hostname] | map('combine', {'ipv4': [{'address': item.ipv4}]}) | list }}"
+        state: merged
+      when: inventory_hostname in router_interfaces
+
+    - name: Configure interface descriptions
+      cisco.ios.ios_interfaces:
+        config:
+          - name: "{{ item.name }}"
+            description: "{{ item.description }}"
+            enabled: true
+        state: merged
+      loop: "{{ router_interfaces[inventory_hostname] }}"
+      when: inventory_hostname in router_interfaces
+
+- name: Configure Switch Management Interfaces
+  hosts: switches
+  gather_facts: no
+  connection: network_cli
+  
+  vars:
+    switch_mgmt:
+      switch1:
+        vlan: 99
+        ip: 192.168.99.10/24
+        gateway: 192.168.99.1
+      switch2:
+        vlan: 99
+        ip: 192.168.99.11/24
+        gateway: 192.168.99.1
+
+  tasks:
+    - name: Configure management VLAN interface
+      cisco.ios.ios_l3_interfaces:
+        config:
+          - name: "Vlan{{ switch_mgmt[inventory_hostname].vlan }}"
+            ipv4:
+              - address: "{{ switch_mgmt[inventory_hostname].ip }}"
+        state: merged
+      when: inventory_hostname in switch_mgmt
+
+    - name: Configure default gateway
+      cisco.ios.ios_config:
+        lines:
+          - "ip default-gateway {{ switch_mgmt[inventory_hostname].gateway }}"
+      when: inventory_hostname in switch_mgmt

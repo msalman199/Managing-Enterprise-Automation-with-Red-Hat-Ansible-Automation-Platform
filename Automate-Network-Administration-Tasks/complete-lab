@@ -1,0 +1,732 @@
+Lab 18: Automate Network Administration Tasks
+Objectives
+
+By the end of this lab, students will be able to:
+
+    Install and configure Ansible for network automation
+    Use Ansible network modules to configure routers and switches
+    Automate IP address assignment and VLAN configuration
+    Create and deploy network configurations using Ansible playbooks
+    Implement best practices for network automation with Ansible
+    Troubleshoot common network automation issues
+
+Prerequisites
+
+Before starting this lab, students should have:
+
+    Basic understanding of networking concepts (IP addressing, VLANs, routing)
+    Familiarity with Linux command line operations
+    Basic knowledge of YAML syntax
+    Understanding of SSH and network device management
+    Experience with text editors (nano, vim, or similar)
+
+Lab Environment
+
+Ready-to-Use Cloud Machines: Al Nafi provides Linux-based cloud machines for this lab. Simply click Start Lab to access your pre-configured environment. No need to build your own VM or install additional software.
+
+Your lab environment includes:
+
+    Ubuntu 22.04 LTS with Ansible pre-installed
+    Network simulation environment using GNS3
+    Sample network devices (Cisco IOS routers and switches)
+    All necessary Python libraries and dependencies
+
+Task 1: Set Up Ansible for Network Automation
+Subtask 1.1: Verify Ansible Installation and Configure Environment
+
+First, let's verify that Ansible is properly installed and configure it for network automation.
+
+    Check Ansible version:
+
+ansible --version
+
+    Install additional network collections:
+
+ansible-galaxy collection install cisco.ios
+ansible-galaxy collection install community.network
+ansible-galaxy collection install ansible.netcommon
+
+    Create project directory structure:
+
+mkdir -p ~/network-automation/{inventories,playbooks,group_vars,host_vars,roles}
+cd ~/network-automation
+
+    Create Ansible configuration file:
+
+nano ansible.cfg
+
+Add the following configuration:
+
+[defaults]
+inventory = inventories/hosts.yml
+host_key_checking = False
+timeout = 30
+gathering = explicit
+retry_files_enabled = False
+
+[inventory]
+enable_plugins = host_list, script, auto, yaml, ini, toml
+
+[ssh_connection]
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes
+
+Subtask 1.2: Create Network Inventory
+
+    Create inventory file:
+
+nano inventories/hosts.yml
+
+    Add network devices to inventory:
+
+all:
+  children:
+    routers:
+      hosts:
+        router1:
+          ansible_host: 192.168.1.10
+          ansible_network_os: ios
+          ansible_user: admin
+          ansible_password: cisco123
+          ansible_connection: network_cli
+        router2:
+          ansible_host: 192.168.1.11
+          ansible_network_os: ios
+          ansible_user: admin
+          ansible_password: cisco123
+          ansible_connection: network_cli
+    switches:
+      hosts:
+        switch1:
+          ansible_host: 192.168.1.20
+          ansible_network_os: ios
+          ansible_user: admin
+          ansible_password: cisco123
+          ansible_connection: network_cli
+        switch2:
+          ansible_host: 192.168.1.21
+          ansible_network_os: ios
+          ansible_user: admin
+          ansible_password: cisco123
+          ansible_connection: network_cli
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+    Test connectivity to network devices:
+
+ansible all -m ping
+
+Task 2: Automate IP Address Assignment and VLAN Configuration
+Subtask 2.1: Create VLAN Configuration Playbook
+
+    Create VLAN configuration playbook:
+
+nano playbooks/configure-vlans.yml
+
+    Add VLAN configuration tasks:
+
+---
+- name: Configure VLANs on Switches
+  hosts: switches
+  gather_facts: no
+  connection: network_cli
+  
+  vars:
+    vlans:
+      - id: 10
+        name: "SALES"
+      - id: 20
+        name: "ENGINEERING"
+      - id: 30
+        name: "HR"
+      - id: 99
+        name: "MANAGEMENT"
+
+  tasks:
+    - name: Create VLANs
+      cisco.ios.ios_vlans:
+        config:
+          - vlan_id: "{{ item.id }}"
+            name: "{{ item.name }}"
+            state: active
+        state: merged
+      loop: "{{ vlans }}"
+      
+    - name: Configure trunk ports
+      cisco.ios.ios_l2_interfaces:
+        config:
+          - name: GigabitEthernet0/1
+            trunk:
+              allowed_vlans: "10,20,30,99"
+              native_vlan: 99
+            mode: trunk
+          - name: GigabitEthernet0/2
+            trunk:
+              allowed_vlans: "10,20,30,99"
+              native_vlan: 99
+            mode: trunk
+        state: merged
+
+    - name: Configure access ports
+      cisco.ios.ios_l2_interfaces:
+        config:
+          - name: FastEthernet0/1
+            access:
+              vlan: 10
+            mode: access
+          - name: FastEthernet0/2
+            access:
+              vlan: 20
+            mode: access
+          - name: FastEthernet0/3
+            access:
+              vlan: 30
+            mode: access
+        state: merged
+
+    Run the VLAN configuration playbook:
+
+ansible-playbook playbooks/configure-vlans.yml -v
+
+Subtask 2.2: Create IP Address Assignment Playbook
+
+    Create IP configuration playbook:
+
+nano playbooks/configure-interfaces.yml
+
+    Add interface configuration tasks:
+
+---
+- name: Configure Router Interfaces
+  hosts: routers
+  gather_facts: no
+  connection: network_cli
+  
+  vars:
+    router_interfaces:
+      router1:
+        - name: GigabitEthernet0/0
+          ipv4: 192.168.10.1/24
+          description: "LAN Interface - SALES VLAN"
+        - name: GigabitEthernet0/1
+          ipv4: 192.168.20.1/24
+          description: "LAN Interface - ENGINEERING VLAN"
+        - name: Serial0/0/0
+          ipv4: 10.0.0.1/30
+          description: "WAN Interface to Router2"
+      router2:
+        - name: GigabitEthernet0/0
+          ipv4: 192.168.30.1/24
+          description: "LAN Interface - HR VLAN"
+        - name: GigabitEthernet0/1
+          ipv4: 192.168.99.1/24
+          description: "Management Interface"
+        - name: Serial0/0/0
+          ipv4: 10.0.0.2/30
+          description: "WAN Interface to Router1"
+
+  tasks:
+    - name: Configure router interfaces
+      cisco.ios.ios_l3_interfaces:
+        config: "{{ router_interfaces[inventory_hostname] | map('combine', {'ipv4': [{'address': item.ipv4}]}) | list }}"
+        state: merged
+      when: inventory_hostname in router_interfaces
+
+    - name: Configure interface descriptions
+      cisco.ios.ios_interfaces:
+        config:
+          - name: "{{ item.name }}"
+            description: "{{ item.description }}"
+            enabled: true
+        state: merged
+      loop: "{{ router_interfaces[inventory_hostname] }}"
+      when: inventory_hostname in router_interfaces
+
+- name: Configure Switch Management Interfaces
+  hosts: switches
+  gather_facts: no
+  connection: network_cli
+  
+  vars:
+    switch_mgmt:
+      switch1:
+        vlan: 99
+        ip: 192.168.99.10/24
+        gateway: 192.168.99.1
+      switch2:
+        vlan: 99
+        ip: 192.168.99.11/24
+        gateway: 192.168.99.1
+
+  tasks:
+    - name: Configure management VLAN interface
+      cisco.ios.ios_l3_interfaces:
+        config:
+          - name: "Vlan{{ switch_mgmt[inventory_hostname].vlan }}"
+            ipv4:
+              - address: "{{ switch_mgmt[inventory_hostname].ip }}"
+        state: merged
+      when: inventory_hostname in switch_mgmt
+
+    - name: Configure default gateway
+      cisco.ios.ios_config:
+        lines:
+          - "ip default-gateway {{ switch_mgmt[inventory_hostname].gateway }}"
+      when: inventory_hostname in switch_mgmt
+
+    Run the interface configuration playbook:
+
+ansible-playbook playbooks/configure-interfaces.yml -v
+
+Task 3: Deploy Network Configurations Using Playbooks
+Subtask 3.1: Create Comprehensive Network Configuration Playbook
+
+    Create routing configuration playbook:
+
+nano playbooks/configure-routing.yml
+
+    Add routing configuration:
+
+---
+- name: Configure OSPF Routing
+  hosts: routers
+  gather_facts: no
+  connection: network_cli
+  
+  vars:
+    ospf_config:
+      process_id: 1
+      router_id_map:
+        router1: "1.1.1.1"
+        router2: "2.2.2.2"
+      networks:
+        router1:
+          - network: "192.168.10.0"
+            wildcard: "0.0.0.255"
+            area: 0
+          - network: "192.168.20.0"
+            wildcard: "0.0.0.255"
+            area: 0
+          - network: "10.0.0.0"
+            wildcard: "0.0.0.3"
+            area: 0
+        router2:
+          - network: "192.168.30.0"
+            wildcard: "0.0.0.255"
+            area: 0
+          - network: "192.168.99.0"
+            wildcard: "0.0.0.255"
+            area: 0
+          - network: "10.0.0.0"
+            wildcard: "0.0.0.3"
+            area: 0
+
+  tasks:
+    - name: Configure OSPF process
+      cisco.ios.ios_config:
+        lines:
+          - "router ospf {{ ospf_config.process_id }}"
+          - "router-id {{ ospf_config.router_id_map[inventory_hostname] }}"
+          - "log-adjacency-changes"
+        parents: []
+
+    - name: Configure OSPF networks
+      cisco.ios.ios_config:
+        lines:
+          - "network {{ item.network }} {{ item.wildcard }} area {{ item.area }}"
+        parents:
+          - "router ospf {{ ospf_config.process_id }}"
+      loop: "{{ ospf_config.networks[inventory_hostname] }}"
+      when: inventory_hostname in ospf_config.networks
+
+    Create security configuration playbook:
+
+nano playbooks/configure-security.yml
+
+    Add security configuration:
+
+---
+- name: Configure Basic Security Settings
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  
+  vars:
+    security_config:
+      enable_secret: "cisco123"
+      banner_motd: "Authorized Access Only - Network Managed by Ansible"
+      console_password: "console123"
+      vty_password: "vty123"
+      ssh_version: 2
+      domain_name: "lab.local"
+
+  tasks:
+    - name: Configure enable secret
+      cisco.ios.ios_config:
+        lines:
+          - "enable secret {{ security_config.enable_secret }}"
+
+    - name: Configure banner
+      cisco.ios.ios_banner:
+        banner: motd
+        text: "{{ security_config.banner_motd }}"
+        state: present
+
+    - name: Configure console line
+      cisco.ios.ios_config:
+        lines:
+          - "password {{ security_config.console_password }}"
+          - "login"
+          - "logging synchronous"
+        parents:
+          - "line console 0"
+
+    - name: Configure VTY lines
+      cisco.ios.ios_config:
+        lines:
+          - "password {{ security_config.vty_password }}"
+          - "login"
+          - "transport input ssh"
+        parents:
+          - "line vty 0 4"
+
+    - name: Configure SSH
+      cisco.ios.ios_config:
+        lines:
+          - "ip domain-name {{ security_config.domain_name }}"
+          - "ip ssh version {{ security_config.ssh_version }}"
+          - "crypto key generate rsa modulus 2048"
+
+Subtask 3.2: Create Master Deployment Playbook
+
+    Create master playbook:
+
+nano playbooks/deploy-network.yml
+
+    Add master deployment configuration:
+
+---
+- name: Complete Network Deployment
+  hosts: localhost
+  gather_facts: no
+  
+  tasks:
+    - name: Deploy VLAN Configuration
+      include: configure-vlans.yml
+      tags: vlans
+
+    - name: Deploy Interface Configuration
+      include: configure-interfaces.yml
+      tags: interfaces
+
+    - name: Deploy Routing Configuration
+      include: configure-routing.yml
+      tags: routing
+
+    - name: Deploy Security Configuration
+      include: configure-security.yml
+      tags: security
+
+- name: Verify Network Configuration
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  
+  tasks:
+    - name: Gather device facts
+      cisco.ios.ios_facts:
+        gather_subset: all
+      register: device_facts
+
+    - name: Display device information
+      debug:
+        msg: |
+          Device: {{ inventory_hostname }}
+          Model: {{ device_facts.ansible_facts.ansible_net_model }}
+          Version: {{ device_facts.ansible_facts.ansible_net_version }}
+          Hostname: {{ device_facts.ansible_facts.ansible_net_hostname }}
+          Interfaces: {{ device_facts.ansible_facts.ansible_net_interfaces.keys() | list }}
+
+    - name: Check interface status
+      cisco.ios.ios_command:
+        commands:
+          - show ip interface brief
+      register: interface_status
+
+    - name: Display interface status
+      debug:
+        var: interface_status.stdout_lines
+
+    Run the master deployment playbook:
+
+ansible-playbook playbooks/deploy-network.yml -v
+
+Subtask 3.3: Create Configuration Backup and Restore Playbooks
+
+    Create backup playbook:
+
+nano playbooks/backup-configs.yml
+
+    Add backup configuration:
+
+---
+- name: Backup Network Device Configurations
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  
+  vars:
+    backup_dir: "{{ playbook_dir }}/../backups"
+    timestamp: "{{ ansible_date_time.epoch }}"
+
+  tasks:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+      delegate_to: localhost
+      run_once: true
+
+    - name: Backup running configuration
+      cisco.ios.ios_config:
+        backup: yes
+        backup_options:
+          filename: "{{ inventory_hostname }}_{{ timestamp }}.cfg"
+          dir_path: "{{ backup_dir }}"
+      register: backup_result
+
+    - name: Display backup information
+      debug:
+        msg: "Configuration backed up to: {{ backup_result.backup_path }}"
+
+    Create validation playbook:
+
+nano playbooks/validate-network.yml
+
+    Add validation tasks:
+
+---
+- name: Validate Network Configuration
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  
+  tasks:
+    - name: Check OSPF neighbors (routers only)
+      cisco.ios.ios_command:
+        commands:
+          - show ip ospf neighbor
+      register: ospf_neighbors
+      when: "'routers' in group_names"
+
+    - name: Display OSPF neighbors
+      debug:
+        var: ospf_neighbors.stdout_lines
+      when: "'routers' in group_names"
+
+    - name: Check VLAN status (switches only)
+      cisco.ios.ios_command:
+        commands:
+          - show vlan brief
+      register: vlan_status
+      when: "'switches' in group_names"
+
+    - name: Display VLAN status
+      debug:
+        var: vlan_status.stdout_lines
+      when: "'switches' in group_names"
+
+    - name: Check interface status
+      cisco.ios.ios_command:
+        commands:
+          - show ip interface brief
+      register: interface_brief
+
+    - name: Verify interface configuration
+      debug:
+        var: interface_brief.stdout_lines
+
+    - name: Test connectivity between devices
+      cisco.ios.ios_ping:
+        dest: "{{ hostvars[item]['ansible_host'] }}"
+        count: 3
+      register: ping_results
+      loop: "{{ groups['all'] }}"
+      when: item != inventory_hostname
+      ignore_errors: yes
+
+    - name: Display connectivity results
+      debug:
+        msg: "Ping to {{ item.item }}: {{ 'SUCCESS' if item.packet_loss == '0%' else 'FAILED' }}"
+      loop: "{{ ping_results.results }}"
+      when: ping_results.results is defined
+
+    Run validation playbook:
+
+ansible-playbook playbooks/validate-network.yml -v
+
+Advanced Configuration and Best Practices
+Creating Ansible Vault for Sensitive Data
+
+    Create encrypted vault file:
+
+ansible-vault create group_vars/all/vault.yml
+
+    Add sensitive variables:
+
+vault_enable_secret: "supersecret123"
+vault_console_password: "console456"
+vault_vty_password: "vty789"
+vault_snmp_community: "private123"
+
+    Update playbooks to use vault variables:
+
+nano playbooks/configure-security-vault.yml
+
+---
+- name: Configure Security with Vault
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  
+  tasks:
+    - name: Configure enable secret from vault
+      cisco.ios.ios_config:
+        lines:
+          - "enable secret {{ vault_enable_secret }}"
+
+    - name: Configure console password from vault
+      cisco.ios.ios_config:
+        lines:
+          - "password {{ vault_console_password }}"
+          - "login"
+        parents:
+          - "line console 0"
+
+    Run playbook with vault:
+
+ansible-playbook playbooks/configure-security-vault.yml --ask-vault-pass
+
+Creating Custom Ansible Roles
+
+    Create role structure:
+
+ansible-galaxy init roles/network-base-config
+
+    Edit role tasks:
+
+nano roles/network-base-config/tasks/main.yml
+
+---
+- name: Configure hostname
+  cisco.ios.ios_config:
+    lines:
+      - "hostname {{ inventory_hostname }}"
+
+- name: Configure domain name
+  cisco.ios.ios_config:
+    lines:
+      - "ip domain-name {{ domain_name | default('lab.local') }}"
+
+- name: Configure NTP servers
+  cisco.ios.ios_config:
+    lines:
+      - "ntp server {{ item }}"
+  loop: "{{ ntp_servers | default(['pool.ntp.org']) }}"
+
+- name: Configure logging
+  cisco.ios.ios_config:
+    lines:
+      - "logging buffered 16384"
+      - "logging console warnings"
+      - "service timestamps log datetime msec"
+
+    Use role in playbook:
+
+nano playbooks/deploy-with-roles.yml
+
+---
+- name: Deploy Network Configuration with Roles
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  
+  roles:
+    - network-base-config
+
+Troubleshooting Common Issues
+Connection Issues
+
+    Test SSH connectivity:
+
+ssh admin@192.168.1.10
+
+    Check Ansible connectivity:
+
+ansible all -m ping -vvv
+
+    Verify inventory syntax:
+
+ansible-inventory --list
+
+Configuration Issues
+
+    Run playbook in check mode:
+
+ansible-playbook playbooks/configure-vlans.yml --check
+
+    Use verbose output for debugging:
+
+ansible-playbook playbooks/configure-vlans.yml -vvv
+
+    Validate YAML syntax:
+
+ansible-playbook playbooks/configure-vlans.yml --syntax-check
+
+Performance Optimization
+
+    Use strategy plugins for parallel execution:
+
+- name: Fast Network Configuration
+  hosts: all
+  strategy: free
+  gather_facts: no
+
+    Implement error handling:
+
+tasks:
+  - name: Configure interface
+    cisco.ios.ios_l3_interfaces:
+      config: "{{ interface_config }}"
+    rescue:
+      - name: Log error
+        debug:
+          msg: "Failed to configure interface on {{ inventory_hostname }}"
+      - name: Continue with next task
+        meta: clear_host_errors
+
+Conclusion
+
+In this comprehensive lab, you have successfully:
+
+    Set up Ansible for network automation by installing necessary collections and configuring the environment
+    Automated VLAN configuration across multiple switches using Ansible playbooks
+    Implemented IP address assignment for routers and switches programmatically
+    Deployed routing protocols (OSPF) using infrastructure as code principles
+    Applied security configurations consistently across all network devices
+    Created backup and validation procedures to ensure configuration integrity
+    Implemented best practices including Ansible Vault for sensitive data and custom roles for reusability
+
+Why This Matters:
+
+Network automation with Ansible provides several critical benefits:
+
+    Consistency: Eliminates human error and ensures uniform configurations
+    Scalability: Easily manage hundreds of devices with the same effort as managing one
+    Speed: Deploy configurations in minutes rather than hours or days
+    Documentation: Playbooks serve as living documentation of your network infrastructure
+    Compliance: Ensure all devices meet security and operational standards
+    Recovery: Quickly restore configurations during outages or disasters
+
+This lab has equipped you with practical skills for automating network administration tasks, which are essential for modern network operations and align with industry certifications like Red Hat Ansible Automation Platform. These automation techniques will significantly improve your efficiency as a network administrator and prepare you for enterprise-scale network management challenges.
+
+The skills learned here directly apply to real-world scenarios where network teams manage complex infrastructures, and automation becomes not just beneficial but necessary for maintaining reliable, secure, and scalable network operations.

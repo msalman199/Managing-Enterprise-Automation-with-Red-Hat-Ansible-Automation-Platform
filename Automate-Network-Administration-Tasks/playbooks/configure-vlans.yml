@@ -1,0 +1,14 @@
+- name: Fast Network Configuration
+  hosts: all
+  strategy: free
+  gather_facts: no
+tasks:
+  - name: Configure interface
+    cisco.ios.ios_l3_interfaces:
+      config: "{{ interface_config }}"
+    rescue:
+      - name: Log error
+        debug:
+          msg: "Failed to configure interface on {{ inventory_hostname }}"
+      - name: Continue with next task
+        meta: clear_host_errors

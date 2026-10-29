@@ -1,0 +1,51 @@
+---
+- name: Complete Network Deployment
+  hosts: localhost
+  gather_facts: no
+  
+  tasks:
+    - name: Deploy VLAN Configuration
+      include: configure-vlans.yml
+      tags: vlans
+
+    - name: Deploy Interface Configuration
+      include: configure-interfaces.yml
+      tags: interfaces
+
+    - name: Deploy Routing Configuration
+      include: configure-routing.yml
+      tags: routing
+
+    - name: Deploy Security Configuration
+      include: configure-security.yml
+      tags: security
+
+- name: Verify Network Configuration
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  
+  tasks:
+    - name: Gather device facts
+      cisco.ios.ios_facts:
+        gather_subset: all
+      register: device_facts
+
+    - name: Display device information
+      debug:
+        msg: |
+          Device: {{ inventory_hostname }}
+          Model: {{ device_facts.ansible_facts.ansible_net_model }}
+          Version: {{ device_facts.ansible_facts.ansible_net_version }}
+          Hostname: {{ device_facts.ansible_facts.ansible_net_hostname }}
+          Interfaces: {{ device_facts.ansible_facts.ansible_net_interfaces.keys() | list }}
+
+    - name: Check interface status
+      cisco.ios.ios_command:
+        commands:
+          - show ip interface brief
+      register: interface_status
+
+    - name: Display interface status
+      debug:
+        var: interface_status.stdout_lines

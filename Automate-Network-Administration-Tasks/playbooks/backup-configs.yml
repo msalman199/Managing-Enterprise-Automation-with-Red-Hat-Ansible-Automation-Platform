@@ -1,0 +1,29 @@
+---
+- name: Backup Network Device Configurations
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  
+  vars:
+    backup_dir: "{{ playbook_dir }}/../backups"
+    timestamp: "{{ ansible_date_time.epoch }}"
+
+  tasks:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+      delegate_to: localhost
+      run_once: true
+
+    - name: Backup running configuration
+      cisco.ios.ios_config:
+        backup: yes
+        backup_options:
+          filename: "{{ inventory_hostname }}_{{ timestamp }}.cfg"
+          dir_path: "{{ backup_dir }}"
+      register: backup_result
+
+    - name: Display backup information
+      debug:
+        msg: "Configuration backed up to: {{ backup_result.backup_path }}"
